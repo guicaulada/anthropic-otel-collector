@@ -1,0 +1,2 @@
+endpoint: "localhost:4319"
+anthropic_api: "https://api.anthropic.com"

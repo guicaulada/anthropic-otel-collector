@@ -1,0 +1,52 @@
+# Anthropic OTel Collector Configuration
+#
+# This configuration sets up the collector to proxy Anthropic API requests
+# and export captured telemetry (traces, metrics, logs) via OTLP.
+
+receivers:
+  # The anthropic receiver acts as a reverse proxy in front of the Anthropic API.
+  # Point your Anthropic SDK at http://localhost:4319 instead of https://api.anthropic.com.
+  anthropic:
+    endpoint: "0.0.0.0:4319"
+    anthropic_api: "https://api.anthropic.com"
+    # capture_request_body: false
+    # capture_response_body: false
+    # max_body_capture_size: 65536
+    # redact_api_key: true
+    # rate_limit_warning_threshold: 0.8
+    # parse_tool_calls: true
+    # include_file_path_label: false
+
+exporters:
+  # Debug exporter prints telemetry to stdout for development.
+  debug:
+    verbosity: detailed
+
+  # OTLP gRPC exporter sends telemetry to an OTLP-compatible backend.
+  otlp_grpc:
+    endpoint: "localhost:4317"
+    tls:
+      insecure: true
+
+  # OTLP HTTP exporter sends telemetry over HTTP.
+  otlphttp:
+    endpoint: "http://localhost:4318"
+
+processors:
+  # Batch processor groups data before export to reduce overhead.
+  batch: {}
+
+service:
+  pipelines:
+    traces:
+      receivers: [anthropic]
+      processors: [batch]
+      exporters: [debug, otlp_grpc]
+    metrics:
+      receivers: [anthropic]
+      processors: [batch]
+      exporters: [debug, otlp_grpc]
+    logs:
+      receivers: [anthropic]
+      processors: [batch]
+      exporters: [debug, otlp_grpc]

@@ -1,0 +1,10 @@
+type: receiver
+scope_name: github.com/guicaulada/anthropic-otel-collector/receiver/anthropicreceiver
+
+status:
+  class: receiver
+  stability:
+    alpha: [traces, metrics, logs]
+  distributions: []
+  codeowners:
+    active: [guicaulada]

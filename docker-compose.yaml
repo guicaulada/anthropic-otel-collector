@@ -1,0 +1,26 @@
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4319:4319"
+    volumes:
+      - ./docker-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - grafana
+    networks:
+      - otel
+
+  grafana:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"   # Grafana UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - otel
+
+networks:
+  otel:
+    driver: bridge
