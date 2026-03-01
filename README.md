@@ -23,6 +23,8 @@ Point your Anthropic SDK at the collector instead of `https://api.anthropic.com`
 
 The collector intercepts all traffic between your application and the Anthropic API. It parses requests and responses (including SSE streams), extracts telemetry, and forwards everything to your observability backend via OTLP. The proxy is fully transparent — your application receives the original API response unmodified.
 
+When used with Claude Code, the collector automatically tracks **sessions** and **projects** — grouping related API calls by working directory and detecting session boundaries via timeouts and conversation resets. This gives you cost, token, and request metrics broken down by session and project with zero configuration.
+
 ## Quick Start
 
 ### Docker Compose (recommended)
@@ -102,6 +104,11 @@ receivers:
 
     # Include full file paths as metric labels (disabled by default, high cardinality)
     include_file_path_label: false
+
+    # Session timeout for Claude Code session tracking (default: 30m)
+    # Sessions are identified by (API key, project path). A new session starts
+    # when the timeout elapses or a conversation reset is detected.
+    session_timeout: 30m
 
     # Per-model pricing for cost calculation (USD per million tokens)
     # Defaults are included for current Claude models. Override or extend as needed:
@@ -226,6 +233,17 @@ Every API call produces a trace with two spans:
 | `anthropic.organization_id`                               | Organization ID from response headers                         |
 | `anthropic.cost.multiplier`                               | Cost multiplier applied (fast/long_context/fast+long_context) |
 
+**Claude Code session attributes** (only for Claude Code requests):
+
+| Attribute                            | Description                                    |
+| ------------------------------------ | ---------------------------------------------- |
+| `claude_code.is_claude_code`         | Always `true` for Claude Code requests         |
+| `claude_code.session.id`            | Unique session identifier                       |
+| `claude_code.session.request_number` | 1-based request sequence within the session    |
+| `claude_code.project.path`          | Working directory path                          |
+| `claude_code.project.name`          | Project directory name (base of path)           |
+| `claude_code.user_id`              | User identifier from request metadata (if set)  |
+
 **Streaming attributes** (only for streaming requests):
 
 | Attribute                                    | Description                   |
@@ -258,7 +276,7 @@ Every API call produces a trace with two spans:
 
 ### Metrics
 
-All metrics share these common attributes: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `http.response.status_code`, `anthropic.request.streaming`, `anthropic.api_key_hash`, `server.address`, `server.port`.
+All metrics share these common attributes: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `http.response.status_code`, `anthropic.request.streaming`, `anthropic.api_key_hash`, `server.address`, `server.port`. For Claude Code requests, `claude_code.project.name` is also included in common attributes.
 
 #### Latency & Duration
 
@@ -324,8 +342,8 @@ All metrics share these common attributes: `gen_ai.operation.name`, `gen_ai.prov
 
 | Metric                             | Type      | Unit    | Description                    |
 | ---------------------------------- | --------- | ------- | ------------------------------ |
-| `anthropic.thinking.enabled`       | Sum       | request | Requests with thinking enabled |
-| `anthropic.thinking.budget_tokens` | Histogram | token   | Thinking budget token limit    |
+| `anthropic.thinking.enabled`       | Sum       | request | Requests with thinking enabled            |
+| `anthropic.thinking.budget_tokens` | Histogram | token   | Thinking budget token limit (only when > 0) |
 
 #### Rate Limits
 
@@ -337,9 +355,9 @@ All metrics share these common attributes: `gen_ai.operation.name`, `gen_ai.prov
 | `anthropic.ratelimit.input_tokens.limit`        | Gauge | token   | Input token rate limit         |
 | `anthropic.ratelimit.input_tokens.remaining`    | Gauge | token   | Remaining input tokens         |
 | `anthropic.ratelimit.input_tokens.utilization`  | Gauge | ratio   | Input token utilization (0-1)  |
-| `anthropic.ratelimit.output_tokens.limit`       | Gauge | token   | Output token rate limit        |
-| `anthropic.ratelimit.output_tokens.remaining`   | Gauge | token   | Remaining output tokens        |
-| `anthropic.ratelimit.output_tokens.utilization` | Gauge | ratio   | Output token utilization (0-1) |
+| `anthropic.ratelimit.output_tokens.limit`       | Gauge | token   | Output token rate limit (only when > 0)        |
+| `anthropic.ratelimit.output_tokens.remaining`   | Gauge | token   | Remaining output tokens (only when limit > 0)  |
+| `anthropic.ratelimit.output_tokens.utilization` | Gauge | ratio   | Output token utilization (only when limit > 0) |
 
 #### Streaming
 
@@ -383,8 +401,7 @@ These metrics are emitted when `parse_tool_calls` is enabled (default) and the m
 
 | Metric                             | Type      | Unit      | Description                                       |
 | ---------------------------------- | --------- | --------- | ------------------------------------------------- |
-| `anthropic.tool_calls`             | Sum       | call      | Tool calls by `tool.name`                         |
-| `anthropic.tool_use.calls`         | Sum       | call      | Parsed tool calls by `tool.name`                  |
+| `anthropic.tool_use.calls`         | Sum       | call      | Tool calls by `tool.name`                         |
 | `anthropic.tool_use.file_edits`    | Sum       | edit      | File edit operations                              |
 | `anthropic.tool_use.lines_added`   | Sum       | line      | Lines added across edits                          |
 | `anthropic.tool_use.lines_removed` | Sum       | line      | Lines removed across edits                        |
@@ -399,10 +416,25 @@ These metrics are emitted when `parse_tool_calls` is enabled (default) and the m
 | `anthropic.tool_use.files_touched` | Sum       | file      | Unique files touched (edit/write/read)            |
 | `anthropic.tool_use.file_type`     | Sum       | operation | Operations by `file.extension` and operation type |
 
+#### Claude Code Sessions
+
+These metrics are emitted only for Claude Code requests. Session metrics include `claude_code.session.id` and `claude_code.project.name` labels. Project metrics include only `claude_code.project.name` to avoid cardinality explosion.
+
+| Metric                                  | Type | Unit    | Description                                |
+| --------------------------------------- | ---- | ------- | ------------------------------------------ |
+| `claude_code.session.requests`          | Sum  | request | Request count per session                  |
+| `claude_code.session.active_duration`   | Sum  | s       | Cumulative request duration per session    |
+| `claude_code.session.cost`              | Sum  | USD     | Cumulative cost per session                |
+| `claude_code.session.tokens.input`      | Sum  | token   | Cumulative input tokens per session        |
+| `claude_code.session.tokens.output`     | Sum  | token   | Cumulative output tokens per session       |
+| `claude_code.project.requests`          | Sum  | request | Request count per project                  |
+| `claude_code.project.cost`             | Sum  | USD     | Cumulative cost per project                |
+
 ### Logs
 
 | Log                 | Severity   | Description                                                |
 | ------------------- | ---------- | ---------------------------------------------------------- |
+| Session started     | INFO       | Emitted on the first request of a new Claude Code session  |
 | Operation log       | INFO/ERROR | Emitted for every request with full metadata               |
 | Request body        | DEBUG      | Raw request JSON (requires `capture_request_body: true`)   |
 | Response body       | DEBUG      | Raw response JSON (requires `capture_response_body: true`) |
