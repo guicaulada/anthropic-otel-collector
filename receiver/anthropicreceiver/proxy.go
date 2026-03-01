@@ -218,6 +218,9 @@ func (r *anthropicReceiver) handleNonStreamingResponse(
 		data.response = &anthropicResp
 	}
 
+	// Track session for Claude Code requests
+	r.trackSession(data, prc)
+
 	// Emit telemetry
 	r.telemetry.emit(prc.ctx, data)
 }
@@ -361,8 +364,37 @@ func (r *anthropicReceiver) handleStreamingResponse(
 		apiVersion:      prc.apiVersion,
 	}
 
+	// Track session for Claude Code requests
+	r.trackSession(data, prc)
+
 	// Emit telemetry
 	r.telemetry.emit(prc.ctx, data)
+}
+
+// trackSession extracts Claude Code context and tracks session state.
+// Only affects Claude Code requests; non-Claude-Code clients are unaffected.
+func (r *anthropicReceiver) trackSession(data *requestData, prc *proxyRequestContext) {
+	ccCtx := ExtractClaudeCodeContext(prc.anthropicReq, prc.betaFeatures)
+	if !ccCtx.IsClaudeCode {
+		return
+	}
+
+	inputTokens := 0
+	outputTokens := 0
+	if data.response != nil {
+		inputTokens = data.response.Usage.TotalInputTokens()
+		outputTokens = data.response.Usage.OutputTokens
+	}
+
+	sc := r.sessionTracker.TrackRequest(
+		prc.apiKeyHash,
+		ccCtx,
+		data.cost.TotalCost,
+		inputTokens,
+		outputTokens,
+		data.endTime.Sub(data.startTime),
+	)
+	data.session = &sc
 }
 
 // activeRequestsGauge returns the current number of active requests.

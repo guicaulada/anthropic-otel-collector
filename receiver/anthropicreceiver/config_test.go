@@ -2,6 +2,7 @@ package anthropicreceiver
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -129,6 +130,21 @@ func TestConfig_Validate(t *testing.T) {
 		err := cfg.Validate()
 		require.NoError(t, err)
 	})
+
+	t.Run("negative session_timeout", func(t *testing.T) {
+		cfg := defaultConfig()
+		cfg.SessionTimeout = -1 * time.Second
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "session_timeout must be non-negative")
+	})
+
+	t.Run("zero session_timeout is valid", func(t *testing.T) {
+		cfg := defaultConfig()
+		cfg.SessionTimeout = 0
+		err := cfg.Validate()
+		require.NoError(t, err)
+	})
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -144,6 +160,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 0.8, cfg.RateLimitWarningThreshold)
 	assert.True(t, cfg.ParseToolCalls)
 	assert.False(t, cfg.IncludeFilePathLabel)
+	assert.Equal(t, 30*time.Minute, cfg.SessionTimeout)
 	assert.NotEmpty(t, cfg.Pricing)
 
 	// Verify at least one known model is in pricing

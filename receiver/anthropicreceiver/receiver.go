@@ -25,10 +25,11 @@ type anthropicReceiver struct {
 	metricsConsumer consumer.Metrics
 	logsConsumer    consumer.Logs
 
-	server      *http.Server
-	upstreamURL *url.URL
-	httpClient  *http.Client
-	telemetry   *telemetryBuilder
+	server         *http.Server
+	upstreamURL    *url.URL
+	httpClient     *http.Client
+	telemetry      *telemetryBuilder
+	sessionTracker *sessionTracker
 
 	activeRequests int64
 
@@ -84,6 +85,8 @@ func (r *anthropicReceiver) start(ctx context.Context, host component.Host) erro
 		r.logsConsumer,
 	)
 
+	r.sessionTracker = newSessionTracker(r.cfg.SessionTimeout)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", r.handleProxy)
 
@@ -126,6 +129,10 @@ func (r *anthropicReceiver) Shutdown(ctx context.Context) error {
 
 func (r *anthropicReceiver) shutdown(ctx context.Context) error {
 	removeReceiver(r.settings.ID)
+
+	if r.sessionTracker != nil {
+		r.sessionTracker.Stop()
+	}
 
 	if r.server != nil {
 		if err := r.server.Shutdown(ctx); err != nil {
