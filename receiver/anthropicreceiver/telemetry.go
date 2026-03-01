@@ -129,9 +129,15 @@ func (tb *telemetryBuilder) emit(ctx context.Context, data *requestData) {
 
 // ---- Traces ----
 
+func setResourceAttributes(attrs pcommon.Map) {
+	attrs.PutStr("service.name", "anthropic-otel-collector")
+	attrs.PutStr("service.namespace", "anthropic")
+}
+
 func (tb *telemetryBuilder) emitTraces(ctx context.Context, data *requestData) error {
 	td := ptrace.NewTraces()
 	rs := td.ResourceSpans().AppendEmpty()
+	setResourceAttributes(rs.Resource().Attributes())
 	ss := rs.ScopeSpans().AppendEmpty()
 	ss.Scope().SetName("github.com/guicaulada/anthropic-otel-collector/receiver/anthropicreceiver")
 
@@ -515,6 +521,7 @@ func (tb *telemetryBuilder) addRateLimitEvent(span ptrace.Span, resource string,
 func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) error {
 	md := pmetric.NewMetrics()
 	rm := md.ResourceMetrics().AppendEmpty()
+	setResourceAttributes(rm.Resource().Attributes())
 	sm := rm.ScopeMetrics().AppendEmpty()
 	sm.Scope().SetName("github.com/guicaulada/anthropic-otel-collector/receiver/anthropicreceiver")
 
@@ -858,6 +865,7 @@ func (tb *telemetryBuilder) addGaugeDP(sm pmetric.ScopeMetrics, name, unit strin
 func (tb *telemetryBuilder) emitLogs(ctx context.Context, data *requestData) error {
 	ld := plog.NewLogs()
 	rl := ld.ResourceLogs().AppendEmpty()
+	setResourceAttributes(rl.Resource().Attributes())
 	sl := rl.ScopeLogs().AppendEmpty()
 	sl.Scope().SetName("github.com/guicaulada/anthropic-otel-collector/receiver/anthropicreceiver")
 
