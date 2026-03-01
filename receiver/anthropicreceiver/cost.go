@@ -15,6 +15,7 @@ type CostResult struct {
 	CacheReadCost     float64
 	CacheCreationCost float64
 	TotalCost         float64
+	CacheSavings      float64
 	Multiplier        string // "standard", "fast", "long_context", "fast+long_context"
 }
 
@@ -61,6 +62,17 @@ func ComputeCost(model string, usage Usage, pricing map[string]ModelPricing, ctx
 	}
 
 	result.TotalCost = result.InputCost + result.OutputCost + result.CacheReadCost + result.CacheCreationCost
+
+	// Cache savings: difference between what cache reads would have cost at input price vs cache read price
+	baseSavings := float64(usage.CacheReadInputTokens) * (p.InputPerMToken - p.CacheReadPerMToken) / 1_000_000
+	if isFast {
+		baseSavings *= 6
+	}
+	if isLongContext {
+		baseSavings *= 2
+	}
+	result.CacheSavings = baseSavings
+
 	return result
 }
 

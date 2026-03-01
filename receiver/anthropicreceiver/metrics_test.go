@@ -422,3 +422,255 @@ func TestEmitMetrics_ConversationTurns(t *testing.T) {
 	}
 	assert.True(t, metricNames["anthropic.request.conversation_turns"])
 }
+
+func TestEmitMetrics_CacheSavings(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.cost.CacheSavings = 0.05
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	var found bool
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "anthropic.cost.cache_savings" {
+			found = true
+			require.Equal(t, pmetric.MetricTypeSum, m.Type())
+			dp := m.Sum().DataPoints().At(0)
+			assert.InDelta(t, 0.05, dp.DoubleValue(), 0.0000001)
+		}
+	}
+	assert.True(t, found, "should emit anthropic.cost.cache_savings metric")
+}
+
+func TestEmitMetrics_CacheSavings_NotEmittedWhenZero(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.cost.CacheSavings = 0
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	for i := 0; i < allMetrics.Len(); i++ {
+		assert.NotEqual(t, "anthropic.cost.cache_savings", allMetrics.At(i).Name(), "should not emit cache savings when zero")
+	}
+}
+
+func TestEmitMetrics_OutputUtilization(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	// MaxTokens=1024, OutputTokens=20 → utilization = 20/1024 ≈ 0.01953125
+	data.request.MaxTokens = 1024
+	data.response.Usage.OutputTokens = 20
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	var found bool
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "anthropic.tokens.output_utilization" {
+			found = true
+			require.Equal(t, pmetric.MetricTypeGauge, m.Type())
+			dp := m.Gauge().DataPoints().At(0)
+			expected := 20.0 / 1024.0
+			assert.InDelta(t, expected, dp.DoubleValue(), 0.0000001)
+		}
+	}
+	assert.True(t, found, "should emit anthropic.tokens.output_utilization gauge")
+}
+
+func TestEmitMetrics_SessionEnrichmentMetrics(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_enrich",
+		ProjectName: "my-project",
+	}
+	data.response.Usage.CacheReadInputTokens = 500
+	data.request.Messages = []Message{
+		{Role: "user", Content: []byte(`"Hello"`)},
+		{Role: "assistant", Content: []byte(`"Hi"`)},
+		{Role: "user", Content: []byte(`"Do something"`)},
+	}
+	data.toolCalls = []ToolCallInfo{
+		{ToolName: "Edit", LinesAdded: 10, LinesRemoved: 3},
+		{ToolName: "Read"},
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.True(t, metricNames["claude_code.session.tokens.cache_read"], "should have session cache read tokens")
+	assert.True(t, metricNames["claude_code.session.conversation_turns"], "should have session conversation turns")
+	assert.True(t, metricNames["claude_code.session.tool_calls"], "should have session tool calls")
+	assert.True(t, metricNames["claude_code.session.lines_changed"], "should have session lines changed")
+
+	// Verify cache read value
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "claude_code.session.tokens.cache_read" {
+			dp := m.Sum().DataPoints().At(0)
+			assert.Equal(t, int64(500), dp.IntValue())
+		}
+		if m.Name() == "claude_code.session.tool_calls" {
+			dp := m.Sum().DataPoints().At(0)
+			assert.Equal(t, int64(2), dp.IntValue())
+		}
+		if m.Name() == "claude_code.session.lines_changed" {
+			dp := m.Sum().DataPoints().At(0)
+			assert.Equal(t, int64(13), dp.IntValue()) // 10+3
+		}
+	}
+}
+
+func TestEmitMetrics_SessionErrors(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_err",
+		ProjectName: "my-project",
+	}
+	data.statusCode = 500
+	data.response = nil
+	data.cost = CostResult{}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.True(t, metricNames["claude_code.session.errors"], "should have session errors metric")
+}
+
+func TestEmitMetrics_ProjectEnrichmentMetrics(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_proj",
+		ProjectName: "my-project",
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.True(t, metricNames["claude_code.project.tokens.input"], "should have project input tokens")
+	assert.True(t, metricNames["claude_code.project.tokens.output"], "should have project output tokens")
+}
+
+func TestEmitMetrics_ProjectErrors(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_proj_err",
+		ProjectName: "my-project",
+	}
+	data.statusCode = 429
+	data.response = nil
+	data.cost = CostResult{}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.True(t, metricNames["claude_code.project.errors"], "should have project errors metric")
+}
+
+func TestEmitMetrics_ErrorsByType(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.statusCode = 429
+	data.response = nil
+	data.cost = CostResult{}
+	data.errorResponse = &AnthropicError{
+		Error: ErrorDetail{
+			Type:    "rate_limit_error",
+			Message: "Rate limited",
+		},
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	var found bool
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "anthropic.errors.by_type" {
+			found = true
+			dp := m.Sum().DataPoints().At(0)
+			errType, ok := dp.Attributes().Get("error.type")
+			require.True(t, ok, "should have error.type attribute")
+			assert.Equal(t, "rate_limit_error", errType.Str())
+		}
+	}
+	assert.True(t, found, "should emit anthropic.errors.by_type metric")
+}
+
+func TestEmitMetrics_ErrorsByType_NoErrorResponse(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.statusCode = 500
+	data.response = nil
+	data.cost = CostResult{}
+	data.errorResponse = nil
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "anthropic.errors.by_type" {
+			dp := m.Sum().DataPoints().At(0)
+			errType, ok := dp.Attributes().Get("error.type")
+			require.True(t, ok, "should have error.type attribute")
+			assert.Equal(t, "http_500", errType.Str())
+			return
+		}
+	}
+	t.Fatal("anthropic.errors.by_type metric not found")
+}

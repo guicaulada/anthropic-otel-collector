@@ -135,6 +135,15 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 	// 7. anthropic.errors
 	if data.statusCode >= 400 {
 		tb.addSumDP(sm, "anthropic.errors", "{error}", start, now, 1, commonAttrs())
+
+		// anthropic.errors.by_type — error classification with error.type attribute
+		errTypeAttrs := commonAttrs()
+		if data.errorResponse != nil {
+			errTypeAttrs.PutStr("error.type", data.errorResponse.Error.Type)
+		} else {
+			errTypeAttrs.PutStr("error.type", fmt.Sprintf("http_%d", data.statusCode))
+		}
+		tb.addSumDP(sm, "anthropic.errors.by_type", "{error}", start, now, 1, errTypeAttrs)
 	}
 
 	// 8. anthropic.request.body.size
@@ -195,6 +204,12 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		}
 	}
 
+	// Token output utilization gauge
+	if data.request != nil && data.response != nil && data.request.MaxTokens > 0 {
+		utilization := float64(data.response.Usage.OutputTokens) / float64(data.request.MaxTokens)
+		tb.addGaugeDP(sm, "anthropic.tokens.output_utilization", "1", start, now, utilization, commonAttrs())
+	}
+
 	// Request parameter metrics (28-32)
 	if data.request != nil {
 		tb.addHistogramDP(sm, "anthropic.request.max_tokens", "{token}", start, now, float64(data.request.MaxTokens), commonAttrs())
@@ -248,6 +263,11 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		tb.addSumDPf(sm, "anthropic.cost.cache_read", "{USD}", start, now, data.cost.CacheReadCost, commonAttrs())
 		tb.addSumDPf(sm, "anthropic.cost.cache_creation", "{USD}", start, now, data.cost.CacheCreationCost, commonAttrs())
 		tb.addSumDPf(sm, "anthropic.cost.total", "{USD}", start, now, data.cost.TotalCost, commonAttrs())
+	}
+
+	// Cache savings metric
+	if data.cost.CacheSavings > 0 {
+		tb.addSumDPf(sm, "anthropic.cost.cache_savings", "{USD}", start, now, data.cost.CacheSavings, commonAttrs())
 	}
 
 	// Tool use metrics (49-60)
@@ -374,6 +394,39 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		if data.response != nil {
 			tb.addSumDP(sm, "claude_code.session.tokens.input", "{token}", start, now, int64(data.response.Usage.TotalInputTokens()), sessionAttrs())
 			tb.addSumDP(sm, "claude_code.session.tokens.output", "{token}", start, now, int64(data.response.Usage.OutputTokens), sessionAttrs())
+			tb.addSumDP(sm, "claude_code.session.tokens.cache_read", "{token}", start, now, int64(data.response.Usage.CacheReadInputTokens), sessionAttrs())
+		}
+
+		// Session conversation turns: count assistant messages in the request
+		if data.request != nil {
+			convTurns := 0
+			for _, msg := range data.request.Messages {
+				if msg.Role == "assistant" {
+					convTurns++
+				}
+			}
+			if convTurns > 0 {
+				tb.addSumDP(sm, "claude_code.session.conversation_turns", "{turn}", start, now, int64(convTurns), sessionAttrs())
+			}
+		}
+
+		// Session tool calls
+		if len(data.toolCalls) > 0 {
+			tb.addSumDP(sm, "claude_code.session.tool_calls", "{call}", start, now, int64(len(data.toolCalls)), sessionAttrs())
+		}
+
+		// Session lines changed: sum of LinesAdded + LinesRemoved across tool calls
+		var totalLinesChanged int64
+		for _, tc := range data.toolCalls {
+			totalLinesChanged += int64(tc.LinesAdded + tc.LinesRemoved)
+		}
+		if totalLinesChanged > 0 {
+			tb.addSumDP(sm, "claude_code.session.lines_changed", "{line}", start, now, totalLinesChanged, sessionAttrs())
+		}
+
+		// Session errors
+		if data.statusCode >= 400 {
+			tb.addSumDP(sm, "claude_code.session.errors", "{error}", start, now, 1, sessionAttrs())
 		}
 
 		// Project-level metrics (without session.id to avoid cardinality explosion)
@@ -383,6 +436,17 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 
 			tb.addSumDP(sm, "claude_code.project.requests", "{request}", start, now, 1, projectAttrs)
 			tb.addSumDPf(sm, "claude_code.project.cost", "{USD}", start, now, data.cost.TotalCost, projectAttrs)
+
+			// Project token metrics
+			if data.response != nil {
+				tb.addSumDP(sm, "claude_code.project.tokens.input", "{token}", start, now, int64(data.response.Usage.TotalInputTokens()), projectAttrs)
+				tb.addSumDP(sm, "claude_code.project.tokens.output", "{token}", start, now, int64(data.response.Usage.OutputTokens), projectAttrs)
+			}
+
+			// Project errors
+			if data.statusCode >= 400 {
+				tb.addSumDP(sm, "claude_code.project.errors", "{error}", start, now, 1, projectAttrs)
+			}
 		}
 	}
 

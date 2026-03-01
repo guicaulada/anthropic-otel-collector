@@ -136,6 +136,67 @@ func TestComputeCost_LongContext(t *testing.T) {
 	assert.Equal(t, "long_context", longCtx.Multiplier)
 }
 
+func TestComputeCost_CacheSavings(t *testing.T) {
+	pricing := defaultPricing()
+	usage := Usage{
+		CacheReadInputTokens: 1000,
+	}
+
+	result := ComputeCost("claude-sonnet-4-6", usage, pricing, CostContext{})
+
+	// claude-sonnet-4-6: input=$3/MTok, cache_read=$0.3/MTok
+	// savings = 1000 * (3.0 - 0.3) / 1_000_000 = 0.0027
+	assert.InDelta(t, 0.0027, result.CacheSavings, 0.0000001)
+}
+
+func TestComputeCost_CacheSavings_FastMode(t *testing.T) {
+	pricing := defaultPricing()
+	usage := Usage{
+		CacheReadInputTokens: 1000,
+	}
+
+	result := ComputeCost("claude-sonnet-4-6", usage, pricing, CostContext{Speed: "fast"})
+
+	// 0.0027 * 6 = 0.0162
+	assert.InDelta(t, 0.0162, result.CacheSavings, 0.0000001)
+}
+
+func TestComputeCost_CacheSavings_LongContext(t *testing.T) {
+	pricing := defaultPricing()
+	usage := Usage{
+		CacheReadInputTokens: 1000,
+	}
+
+	result := ComputeCost("claude-sonnet-4-6", usage, pricing, CostContext{TotalInputTokens: 300_000})
+
+	// 0.0027 * 2 = 0.0054
+	assert.InDelta(t, 0.0054, result.CacheSavings, 0.0000001)
+}
+
+func TestComputeCost_CacheSavings_FastPlusLongContext(t *testing.T) {
+	pricing := defaultPricing()
+	usage := Usage{
+		CacheReadInputTokens: 1000,
+	}
+
+	result := ComputeCost("claude-sonnet-4-6", usage, pricing, CostContext{Speed: "fast", TotalInputTokens: 300_000})
+
+	// 0.0027 * 12 = 0.0324
+	assert.InDelta(t, 0.0324, result.CacheSavings, 0.0000001)
+}
+
+func TestComputeCost_CacheSavings_NoCacheTokens(t *testing.T) {
+	pricing := defaultPricing()
+	usage := Usage{
+		InputTokens:  1000,
+		OutputTokens: 500,
+	}
+
+	result := ComputeCost("claude-sonnet-4-6", usage, pricing, CostContext{})
+
+	assert.InDelta(t, 0.0, result.CacheSavings, 0.0000001)
+}
+
 func TestComputeCost_FastPlusLongContext(t *testing.T) {
 	pricing := defaultPricing()
 	usage := Usage{
