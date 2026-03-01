@@ -70,6 +70,15 @@ func tableLegend() *common.VizLegendOptionsBuilder {
 		ShowLegend(true)
 }
 
+// rightTableLegend returns a table-format legend placed on the right side.
+// This is the standard Grafana pattern for panels with many series.
+func rightTableLegend() *common.VizLegendOptionsBuilder {
+	return common.NewVizLegendOptionsBuilder().
+		DisplayMode(common.LegendDisplayModeTable).
+		Placement(common.LegendPlacementRight).
+		ShowLegend(true)
+}
+
 // hiddenLegend returns a hidden legend.
 func hiddenLegend() *common.VizLegendOptionsBuilder {
 	return common.NewVizLegendOptionsBuilder().

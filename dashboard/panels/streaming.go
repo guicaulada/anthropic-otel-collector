@@ -71,7 +71,7 @@ func SSEEventTypesOverTime() cog.Builder[dashboard.Panel] {
 		)).
 		FillOpacity(30).
 		Stacking(common.NewStackingConfigBuilder().Mode(common.StackingModeNormal)).
-		Legend(defaultLegend()).
+		Legend(rightTableLegend()).
 		Tooltip(multiTooltip()).
 		Thresholds(greenThresholds()).
 		ColorScheme(paletteColor())

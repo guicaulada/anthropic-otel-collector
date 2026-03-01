@@ -16,7 +16,7 @@ func ToolCallDistribution() cog.Builder[dashboard.Panel] {
 		Title("Tool Call Distribution").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(12).
 		WithTarget(
 			promRangeQuery(
 				`sum by (tool_name) (increase(anthropic_tool_use_calls_total{`+filter+`}[$__range]))`,
@@ -26,8 +26,8 @@ func ToolCallDistribution() cog.Builder[dashboard.Panel] {
 		PieType(piechart.PieChartTypeDonut).
 		Legend(
 			piechart.NewPieChartLegendOptionsBuilder().
-				DisplayMode(common.LegendDisplayModeList).
-				Placement(common.LegendPlacementBottom).
+				DisplayMode(common.LegendDisplayModeTable).
+				Placement(common.LegendPlacementRight).
 				ShowLegend(true).
 				Values([]piechart.PieChartLegendValues{piechart.PieChartLegendValuesPercent, piechart.PieChartLegendValuesValue}),
 		).
@@ -41,14 +41,14 @@ func ToolCallsOverTime() cog.Builder[dashboard.Panel] {
 		Title("Tool Calls Over Time").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(16).
+		Span(12).
 		WithTarget(
 			promRangeQuery(
 				`sum by (tool_name) (rate(anthropic_tool_use_calls_total{`+filter+`}[$__rate_interval]))`,
 				"{{tool_name}}",
 			),
 		).
-		Legend(defaultLegend()).
+		Legend(rightTableLegend()).
 		Tooltip(multiTooltip()).
 		FillOpacity(30).
 		Stacking(

@@ -87,7 +87,25 @@ func ContentBlockTypes() cog.Builder[dashboard.Panel] {
 		)).
 		Orientation(common.VizOrientationHorizontal).
 		Thresholds(greenThresholds()).
-		ColorScheme(paletteColor())
+		ColorScheme(paletteColor()).
+		OverrideByName("tool_use", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Tool Use"},
+		}).
+		OverrideByName("server_tool_use", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Server Tool Use"},
+		}).
+		OverrideByName("text", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Text"},
+		}).
+		OverrideByName("web_search_tool_result", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Web Search Result"},
+		}).
+		OverrideByName("thinking", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Thinking"},
+		}).
+		OverrideByName("redacted_thinking", []dashboard.DynamicConfigValue{
+			{Id: "displayName", Value: "Redacted Thinking"},
+		})
 }
 
 // RequestsBySpeed returns a donut piechart showing requests broken down by speed tier.
@@ -172,7 +190,7 @@ func ServerToolUse() cog.Builder[dashboard.Panel] {
 		Description("Server-side tool usage over the selected range").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(24).
+		Span(8).
 		WithTarget(instantQuery(
 			fmt.Sprintf(`sum(increase(%s{%s}[$__range]))`, MetricServerToolWebSearch, filter),
 			"Web Search",
