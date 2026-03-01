@@ -5,7 +5,7 @@ OCB          := ./ocb
 DIST_DIR     := ./dist
 BINARY       := $(DIST_DIR)/anthropic-otel-collector
 
-.PHONY: install-ocb build run test lint clean docker-build docker-up docker-down
+.PHONY: install-ocb build run test lint clean docker-build docker-up docker-down dashboard
 
 ## install-ocb: Download the OpenTelemetry Collector Builder binary.
 install-ocb:
@@ -38,12 +38,17 @@ lint:
 clean:
 	rm -rf $(DIST_DIR)
 
+## dashboard: Generate the Grafana dashboard JSON.
+dashboard:
+	@mkdir -p dashboard/dist
+	cd dashboard && go run . > dist/anthropic-claude-code-usage.json
+
 ## docker-build: Build the Docker image for the collector.
 docker-build:
 	docker build -t anthropic-otel-collector:latest .
 
 ## docker-up: Start the full observability stack with Docker Compose.
-docker-up:
+docker-up: dashboard
 	docker compose up -d
 
 ## docker-down: Stop the Docker Compose stack.

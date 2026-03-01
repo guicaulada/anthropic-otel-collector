@@ -18,6 +18,10 @@ services:
       - "3000:3000"   # Grafana UI
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./dashboard/dist:/var/lib/grafana/dashboards:ro
+      - ./dashboard/provisioning/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/anthropic.yaml:ro
+      - ./docker/run-prometheus.sh:/otel-lgtm/run-prometheus.sh:ro
     networks:
       - otel
 
