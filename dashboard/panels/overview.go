@@ -236,3 +236,26 @@ func FastModeRequests() cog.Builder[dashboard.Panel] {
 			),
 		)
 }
+
+// CacheSavingsStat returns a stat panel showing total cache savings over the selected range.
+func CacheSavingsStat() cog.Builder[dashboard.Panel] {
+	return stat.NewPanelBuilder().
+		Title("Cache Savings").
+		Datasource(datasourceRef()).
+		Height(8).
+		Span(6).
+		Unit("currencyUSD").
+		Thresholds(greenThresholds()).
+		GraphMode(common.BigValueGraphModeArea).
+		ColorMode(common.BigValueColorModeValue).
+		ReduceOptions(
+			common.NewReduceDataOptionsBuilder().
+				Calcs([]string{"lastNotNull"}),
+		).
+		WithTarget(
+			promInstantQuery(
+				f(`sum(increase(anthropic_cost_cache_savings_total{%s}[$__range]))`),
+				"Cache Savings",
+			),
+		)
+}

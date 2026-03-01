@@ -184,3 +184,49 @@ func ProjectRequestsOverTime() cog.Builder[dashboard.Panel] {
 			),
 		)
 }
+
+// SessionToolCalls returns a stacked timeseries showing tool calls per session.
+func SessionToolCalls() cog.Builder[dashboard.Panel] {
+	return timeseries.NewPanelBuilder().
+		Title("Session Tool Calls").
+		Description("Tool call rate broken down by session").
+		Datasource(datasourceRef()).
+		Height(8).
+		Span(12).
+		FillOpacity(30).
+		Stacking(
+			common.NewStackingConfigBuilder().
+				Mode(common.StackingModeNormal),
+		).
+		Legend(defaultLegend()).
+		Tooltip(multiTooltip()).
+		WithTarget(
+			promRangeQuery(
+				fs(`sum by (claude_code_session_id) (rate(claude_code_session_tool_calls_total{%s}[$__rate_interval]))`),
+				"{{claude_code_session_id}}",
+			),
+		)
+}
+
+// SessionLinesChanged returns a stacked timeseries showing lines changed per session.
+func SessionLinesChanged() cog.Builder[dashboard.Panel] {
+	return timeseries.NewPanelBuilder().
+		Title("Session Lines Changed").
+		Description("Lines changed rate broken down by session").
+		Datasource(datasourceRef()).
+		Height(8).
+		Span(12).
+		FillOpacity(30).
+		Stacking(
+			common.NewStackingConfigBuilder().
+				Mode(common.StackingModeNormal),
+		).
+		Legend(defaultLegend()).
+		Tooltip(multiTooltip()).
+		WithTarget(
+			promRangeQuery(
+				fs(`sum by (claude_code_session_id) (rate(claude_code_session_lines_changed_total{%s}[$__rate_interval]))`),
+				"{{claude_code_session_id}}",
+			),
+		)
+}

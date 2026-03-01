@@ -181,3 +181,22 @@ func WebSearchCost() cog.Builder[dashboard.Panel] {
 			),
 		)
 }
+
+// CacheSavingsOverTime returns a timeseries panel showing cache savings rate in $/hr.
+func CacheSavingsOverTime() cog.Builder[dashboard.Panel] {
+	return timeseries.NewPanelBuilder().
+		Title("Cache Savings Over Time").
+		Description("Estimated cache savings rate in $/hr").
+		Datasource(datasourceRef()).
+		Height(8).
+		Span(12).
+		Unit("currencyUSD").
+		Legend(defaultLegend()).
+		Tooltip(multiTooltip()).
+		WithTarget(
+			promRangeQuery(
+				f(`sum(rate(anthropic_cost_cache_savings_total{%s}[$__rate_interval])) * 3600`),
+				"Cache Savings $/hr",
+			),
+		)
+}

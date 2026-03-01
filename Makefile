@@ -41,7 +41,7 @@ clean:
 ## dashboard: Generate the Grafana dashboard JSON.
 dashboard:
 	@mkdir -p dashboard/dist
-	cd dashboard && go run . > dist/anthropic-claude-code-usage.json
+	cd dashboard && go run . -output-dir dist -dashboard all
 
 ## docker-build: Build the Docker image for the collector.
 docker-build:

@@ -26,6 +26,8 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.SessionRequestsOverTime()).
 		WithPanel(panels.SessionActiveDuration()).
 		WithPanel(panels.ProjectRequestsOverTime()).
+		WithPanel(panels.SessionToolCalls()).
+		WithPanel(panels.SessionLinesChanged()).
 		// Row 1: Overview
 		WithRow(dashboard.NewRowBuilder("Overview")).
 		WithPanel(panels.TotalCost()).
@@ -38,6 +40,7 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.OutputThroughput()).
 		WithPanel(panels.RequestsPerMinute()).
 		WithPanel(panels.FastModeRequests()).
+		WithPanel(panels.CacheSavingsStat()).
 		// Row 2: Cost Analysis
 		WithRow(dashboard.NewRowBuilder("Cost Analysis")).
 		WithPanel(panels.CostOverTime()).
@@ -47,6 +50,7 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.AvgCostPerRequestTimeseries()).
 		WithPanel(panels.CostMultipliedRequests()).
 		WithPanel(panels.WebSearchCost()).
+		WithPanel(panels.CacheSavingsOverTime()).
 		// Row 3: Token Usage
 		WithRow(dashboard.NewRowBuilder("Token Usage")).
 		WithPanel(panels.TokenUsageOverTime()).
