@@ -114,6 +114,21 @@ func TestConfig_Validate(t *testing.T) {
 		err := cfg.Validate()
 		require.NoError(t, err)
 	})
+
+	t.Run("negative max_request_body_size", func(t *testing.T) {
+		cfg := defaultConfig()
+		cfg.MaxRequestBodySize = -1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max_request_body_size must be non-negative")
+	})
+
+	t.Run("zero max_request_body_size is valid", func(t *testing.T) {
+		cfg := defaultConfig()
+		cfg.MaxRequestBodySize = 0
+		err := cfg.Validate()
+		require.NoError(t, err)
+	})
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -121,6 +136,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	assert.Equal(t, "0.0.0.0:4319", cfg.ServerConfig.NetAddr.Endpoint)
 	assert.Equal(t, "https://api.anthropic.com", cfg.AnthropicAPI)
+	assert.Equal(t, int64(10*1024*1024), cfg.MaxRequestBodySize)
 	assert.False(t, cfg.CaptureRequestBody)
 	assert.False(t, cfg.CaptureResponseBody)
 	assert.Equal(t, 65536, cfg.MaxBodyCaptureSize)

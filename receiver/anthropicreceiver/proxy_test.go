@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -254,21 +255,18 @@ func TestHashAPIKey(t *testing.T) {
 }
 
 func TestActiveRequestsGauge(t *testing.T) {
-	// Save and restore
-	original := atomic.LoadInt64(&activeRequests)
-	defer atomic.StoreInt64(&activeRequests, original)
+	r := &anthropicReceiver{}
 
-	atomic.StoreInt64(&activeRequests, 0)
-	assert.Equal(t, int64(0), activeRequestsGauge())
+	assert.Equal(t, int64(0), r.activeRequestsGauge())
 
-	atomic.AddInt64(&activeRequests, 1)
-	assert.Equal(t, int64(1), activeRequestsGauge())
+	atomic.AddInt64(&r.activeRequests, 1)
+	assert.Equal(t, int64(1), r.activeRequestsGauge())
 
-	atomic.AddInt64(&activeRequests, 1)
-	assert.Equal(t, int64(2), activeRequestsGauge())
+	atomic.AddInt64(&r.activeRequests, 1)
+	assert.Equal(t, int64(2), r.activeRequestsGauge())
 
-	atomic.AddInt64(&activeRequests, -1)
-	assert.Equal(t, int64(1), activeRequestsGauge())
+	atomic.AddInt64(&r.activeRequests, -1)
+	assert.Equal(t, int64(1), r.activeRequestsGauge())
 }
 
 func TestTruncateBody(t *testing.T) {
@@ -295,6 +293,151 @@ func TestTruncateBody(t *testing.T) {
 		result := truncateBody(body, 0)
 		assert.Equal(t, body, result)
 	})
+}
+
+func TestProxy_ConcurrentRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * time.Millisecond) // small delay to ensure concurrency
+		w.Header().Set("Content-Type", "application/json")
+		resp := AnthropicResponse{
+			ID:         "msg_concurrent",
+			Type:       "message",
+			Role:       "assistant",
+			Model:      "claude-sonnet-4-6",
+			StopReason: "end_turn",
+			Content:    []ContentBlock{{Type: "text", Text: "ok"}},
+			Usage:      Usage{InputTokens: 10, OutputTokens: 5},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer upstream.Close()
+
+	recv, port := setupTestReceiver(t, upstream.URL)
+
+	const n = 10
+	type result struct {
+		status int
+		err    error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			reqBody := `{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}`
+			resp, err := http.Post(
+				fmt.Sprintf("http://127.0.0.1:%d/v1/messages", port),
+				"application/json",
+				strings.NewReader(reqBody),
+			)
+			if err != nil {
+				results[idx] = result{err: err}
+				return
+			}
+			defer resp.Body.Close()
+			io.ReadAll(resp.Body)
+			results[idx] = result{status: resp.StatusCode}
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i, r := range results {
+		assert.NoError(t, r.err, "request %d should not error", i)
+		if r.err == nil {
+			assert.Equal(t, http.StatusOK, r.status, "request %d should return 200", i)
+		}
+	}
+
+	// After all requests complete, activeRequests should be 0
+	assert.Equal(t, int64(0), recv.activeRequestsGauge())
+}
+
+func TestProxy_UpstreamTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never respond — simulate a hung upstream
+		select {
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+		}
+	}))
+	defer upstream.Close()
+
+	_, port := setupTestReceiver(t, upstream.URL)
+
+	// Override the receiver's HTTP client timeout to something short for testing
+	// We can't easily access the receiver's client, so we use a client with a short timeout
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	reqBody := `{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}`
+
+	resp, err := client.Post(
+		fmt.Sprintf("http://127.0.0.1:%d/v1/messages", port),
+		"application/json",
+		strings.NewReader(reqBody),
+	)
+
+	if err != nil {
+		// Client timeout — expected since upstream never responds
+		assert.Contains(t, err.Error(), "context deadline exceeded")
+		return
+	}
+	defer resp.Body.Close()
+	// If we got a response, it should be 502 (bad gateway) from the proxy's own timeout
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+}
+
+func TestProxy_RequestBodyTooLarge(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	sharedMu.Lock()
+	sharedReceivers = make(map[component.ID]*anthropicReceiver)
+	sharedMu.Unlock()
+
+	port := getFreePort(t)
+
+	cfg := defaultConfig()
+	cfg.ServerConfig.NetAddr.Endpoint = fmt.Sprintf("127.0.0.1:%d", port)
+	cfg.AnthropicAPI = upstream.URL
+	cfg.MaxRequestBodySize = 100 // 100 bytes limit
+
+	settings := receivertest.NewNopSettings(componentType)
+	r := newAnthropicReceiver(cfg, settings)
+	r.tracesConsumer = consumertest.NewNop()
+	r.metricsConsumer = consumertest.NewNop()
+	r.logsConsumer = consumertest.NewNop()
+
+	err := r.Start(context.Background(), componenttest.NewNopHost())
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	}, 2*time.Second, 50*time.Millisecond)
+
+	t.Cleanup(func() {
+		r.Shutdown(context.Background())
+	})
+
+	// Send a request body that exceeds the limit
+	largeBody := strings.Repeat("x", 200)
+	resp, err := http.Post(
+		fmt.Sprintf("http://127.0.0.1:%d/v1/messages", port),
+		"application/json",
+		strings.NewReader(largeBody),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
 }
 
 func TestProxy_StreamingWithNewFields(t *testing.T) {

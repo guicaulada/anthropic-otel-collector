@@ -2,10 +2,13 @@ package anthropicreceiver
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -26,6 +29,8 @@ type anthropicReceiver struct {
 	upstreamURL *url.URL
 	httpClient  *http.Client
 	telemetry   *telemetryBuilder
+
+	activeRequests int64
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -56,7 +61,20 @@ func (r *anthropicReceiver) start(ctx context.Context, host component.Host) erro
 	}
 	r.upstreamURL = u
 
-	r.httpClient = &http.Client{}
+	r.httpClient = &http.Client{
+		Timeout: 5 * time.Minute,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+			IdleConnTimeout:     90 * time.Second,
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			TLSClientConfig:    &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
 
 	r.telemetry = newTelemetryBuilder(
 		r.cfg,

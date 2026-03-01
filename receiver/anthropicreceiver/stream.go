@@ -1,9 +1,7 @@
 package anthropicreceiver
 
 import (
-	"bufio"
 	"encoding/json"
-	"io"
 	"strings"
 	"time"
 )
@@ -244,51 +242,3 @@ type StreamingMetrics struct {
 	BlockDurations   []time.Duration
 }
 
-// ParseSSEStream reads SSE events from a reader and sends them to a channel.
-// It returns when the reader is exhausted or an error occurs.
-func ParseSSEStream(r io.Reader) <-chan SSEEvent {
-	ch := make(chan SSEEvent, 64)
-	go func() {
-		defer close(ch)
-		scanner := bufio.NewScanner(r)
-		// Increase buffer size for large SSE messages
-		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-
-		var currentEvent string
-		var dataLines []string
-
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			if line == "" {
-				// Empty line = end of event
-				if currentEvent != "" && len(dataLines) > 0 {
-					data := strings.Join(dataLines, "\n")
-					ch <- SSEEvent{
-						Event: currentEvent,
-						Data:  json.RawMessage(data),
-					}
-				}
-				currentEvent = ""
-				dataLines = nil
-				continue
-			}
-
-			if strings.HasPrefix(line, "event: ") {
-				currentEvent = strings.TrimPrefix(line, "event: ")
-			} else if strings.HasPrefix(line, "data: ") {
-				dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
-			}
-		}
-
-		// Handle any remaining event
-		if currentEvent != "" && len(dataLines) > 0 {
-			data := strings.Join(dataLines, "\n")
-			ch <- SSEEvent{
-				Event: currentEvent,
-				Data:  json.RawMessage(data),
-			}
-		}
-	}()
-	return ch
-}

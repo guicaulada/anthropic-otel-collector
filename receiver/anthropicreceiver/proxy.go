@@ -14,22 +14,42 @@ import (
 	"go.uber.org/zap"
 )
 
-var activeRequests int64
+// proxyRequestContext holds all context for a proxied request, avoiding long parameter lists.
+type proxyRequestContext struct {
+	ctx             context.Context
+	startTime       time.Time
+	upstreamLatency time.Duration
+	anthropicReq    *AnthropicRequest
+	requestBody     []byte
+	apiKeyHash      string
+	rateLimit       RateLimitInfo
+	requestID       string
+	betaFeatures    string
+	apiVersion      string
+}
 
 func (r *anthropicReceiver) handleProxy(w http.ResponseWriter, req *http.Request) {
 	startTime := time.Now()
-	atomic.AddInt64(&activeRequests, 1)
-	defer atomic.AddInt64(&activeRequests, -1)
+	atomic.AddInt64(&r.activeRequests, 1)
+	defer atomic.AddInt64(&r.activeRequests, -1)
 
 	ctx := req.Context()
 
-	// Read request body
-	bodyBytes, err := io.ReadAll(req.Body)
+	// Read request body with size limit
+	var bodyReader io.Reader = req.Body
+	if r.cfg.MaxRequestBodySize > 0 {
+		bodyReader = io.LimitReader(req.Body, r.cfg.MaxRequestBodySize+1)
+	}
+	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 	req.Body.Close()
+	if r.cfg.MaxRequestBodySize > 0 && int64(len(bodyBytes)) > r.cfg.MaxRequestBodySize {
+		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	// Parse request
 	var anthropicReq AnthropicRequest
@@ -87,28 +107,34 @@ func (r *anthropicReceiver) handleProxy(w http.ResponseWriter, req *http.Request
 	rateLimit := ExtractRateLimitInfo(resp.Header)
 	requestID := resp.Header.Get("request-id")
 
-	// Capture beta features header
+	// Capture request headers for telemetry
 	betaFeatures := req.Header.Get("anthropic-beta")
+	apiVersion := req.Header.Get("anthropic-version")
+
+	prc := &proxyRequestContext{
+		ctx:             ctx,
+		startTime:       startTime,
+		upstreamLatency: upstreamLatency,
+		anthropicReq:    &anthropicReq,
+		requestBody:     bodyBytes,
+		apiKeyHash:      apiKeyHash,
+		rateLimit:       rateLimit,
+		requestID:       requestID,
+		betaFeatures:    betaFeatures,
+		apiVersion:      apiVersion,
+	}
 
 	if anthropicReq.Stream && resp.StatusCode == http.StatusOK {
-		r.handleStreamingResponse(ctx, w, resp, startTime, upstreamLatency, &anthropicReq, bodyBytes, apiKeyHash, rateLimit, requestID, betaFeatures)
+		r.handleStreamingResponse(w, resp, prc)
 	} else {
-		r.handleNonStreamingResponse(ctx, w, resp, startTime, upstreamLatency, &anthropicReq, bodyBytes, apiKeyHash, rateLimit, requestID, betaFeatures)
+		r.handleNonStreamingResponse(w, resp, prc)
 	}
 }
 
 func (r *anthropicReceiver) handleNonStreamingResponse(
-	ctx context.Context,
 	w http.ResponseWriter,
 	resp *http.Response,
-	startTime time.Time,
-	upstreamLatency time.Duration,
-	anthropicReq *AnthropicRequest,
-	requestBody []byte,
-	apiKeyHash string,
-	rateLimit RateLimitInfo,
-	requestID string,
-	betaFeatures string,
+	prc *proxyRequestContext,
 ) {
 	// Read full response
 	respBytes, err := io.ReadAll(resp.Body)
@@ -147,7 +173,7 @@ func (r *anthropicReceiver) handleNonStreamingResponse(
 	if resp.StatusCode == http.StatusOK {
 		responseModel := anthropicResp.Model
 		if responseModel == "" {
-			responseModel = anthropicReq.Model
+			responseModel = prc.anthropicReq.Model
 		}
 		costCtx := CostContext{
 			Speed:            anthropicResp.Usage.Speed,
@@ -158,32 +184,33 @@ func (r *anthropicReceiver) handleNonStreamingResponse(
 
 	// Extract additional metadata
 	speed := ""
-	orgID := rateLimit.OrganizationID
+	orgID := prc.rateLimit.OrganizationID
 	if resp.StatusCode == http.StatusOK {
 		speed = anthropicResp.Usage.Speed
 	}
 
 	// Build request data
 	data := &requestData{
-		startTime:       startTime,
+		startTime:       prc.startTime,
 		endTime:         endTime,
-		upstreamLatency: upstreamLatency,
-		request:         anthropicReq,
-		requestBody:     requestBody,
-		requestSize:     len(requestBody),
-		apiKeyHash:      apiKeyHash,
+		upstreamLatency: prc.upstreamLatency,
+		request:         prc.anthropicReq,
+		requestBody:     prc.requestBody,
+		requestSize:     len(prc.requestBody),
+		apiKeyHash:      prc.apiKeyHash,
 		responseBody:    respBytes,
 		responseSize:    len(respBytes),
 		statusCode:      resp.StatusCode,
-		requestID:       requestID,
-		rateLimit:       rateLimit,
+		requestID:       prc.requestID,
+		rateLimit:       prc.rateLimit,
 		isStreaming:     false,
 		toolCalls:       toolCalls,
 		cost:            cost,
 		errorResponse:   anthropicErr,
-		betaFeatures:    betaFeatures,
+		betaFeatures:    prc.betaFeatures,
 		organizationID:  orgID,
 		speed:           speed,
+		apiVersion:      prc.apiVersion,
 	}
 
 	if resp.StatusCode == http.StatusOK {
@@ -191,21 +218,13 @@ func (r *anthropicReceiver) handleNonStreamingResponse(
 	}
 
 	// Emit telemetry
-	r.telemetry.emit(ctx, data)
+	r.telemetry.emit(prc.ctx, data)
 }
 
 func (r *anthropicReceiver) handleStreamingResponse(
-	ctx context.Context,
 	w http.ResponseWriter,
 	resp *http.Response,
-	startTime time.Time,
-	upstreamLatency time.Duration,
-	anthropicReq *AnthropicRequest,
-	requestBody []byte,
-	apiKeyHash string,
-	rateLimit RateLimitInfo,
-	requestID string,
-	betaFeatures string,
+	prc *proxyRequestContext,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -301,7 +320,7 @@ func (r *anthropicReceiver) handleStreamingResponse(
 	// Compute cost
 	responseModel := anthropicResp.Model
 	if responseModel == "" {
-		responseModel = anthropicReq.Model
+		responseModel = prc.anthropicReq.Model
 	}
 	costCtx := CostContext{
 		Speed:            anthropicResp.Usage.Speed,
@@ -317,35 +336,36 @@ func (r *anthropicReceiver) handleStreamingResponse(
 
 	// Build request data
 	data := &requestData{
-		startTime:       startTime,
+		startTime:       prc.startTime,
 		endTime:         endTime,
-		upstreamLatency: upstreamLatency,
-		request:         anthropicReq,
-		requestBody:     requestBody,
-		requestSize:     len(requestBody),
-		apiKeyHash:      apiKeyHash,
+		upstreamLatency: prc.upstreamLatency,
+		request:         prc.anthropicReq,
+		requestBody:     prc.requestBody,
+		requestSize:     len(prc.requestBody),
+		apiKeyHash:      prc.apiKeyHash,
 		response:        anthropicResp,
 		responseBody:    responseBody,
 		responseSize:    responseSize,
 		statusCode:      resp.StatusCode,
-		requestID:       requestID,
-		rateLimit:       rateLimit,
+		requestID:       prc.requestID,
+		rateLimit:       prc.rateLimit,
 		isStreaming:     true,
 		streaming:       &streamingMetrics,
 		toolCalls:       toolCalls,
 		cost:            cost,
-		betaFeatures:    betaFeatures,
-		organizationID:  rateLimit.OrganizationID,
+		betaFeatures:    prc.betaFeatures,
+		organizationID:  prc.rateLimit.OrganizationID,
 		speed:           anthropicResp.Usage.Speed,
+		apiVersion:      prc.apiVersion,
 	}
 
 	// Emit telemetry
-	r.telemetry.emit(ctx, data)
+	r.telemetry.emit(prc.ctx, data)
 }
 
 // activeRequestsGauge returns the current number of active requests.
-func activeRequestsGauge() int64 {
-	return atomic.LoadInt64(&activeRequests)
+func (r *anthropicReceiver) activeRequestsGauge() int64 {
+	return atomic.LoadInt64(&r.activeRequests)
 }
 
 // truncateBody truncates a body to maxSize bytes, returning the truncated body.

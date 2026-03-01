@@ -2,7 +2,6 @@ package anthropicreceiver
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -346,52 +345,6 @@ func TestStreamAccumulator_ToolUseBlock(t *testing.T) {
 	assert.NotEmpty(t, sa.contentBlocks[0].Input)
 }
 
-func TestParseSSEStream(t *testing.T) {
-	sseData := `event: message_start
-data: {"type":"message_start","message":{"id":"msg_sse","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}
-
-event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}
-
-event: content_block_stop
-data: {"type":"content_block_stop","index":0}
-
-event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
-
-event: message_stop
-data: {}
-
-`
-
-	ch := ParseSSEStream(strings.NewReader(sseData))
-
-	var events []SSEEvent
-	for ev := range ch {
-		events = append(events, ev)
-	}
-
-	require.Len(t, events, 6)
-	assert.Equal(t, SSEEventMessageStart, events[0].Event)
-	assert.Equal(t, SSEEventContentBlockStart, events[1].Event)
-	assert.Equal(t, SSEEventContentBlockDelta, events[2].Event)
-	assert.Equal(t, SSEEventContentBlockStop, events[3].Event)
-	assert.Equal(t, SSEEventMessageDelta, events[4].Event)
-	assert.Equal(t, SSEEventMessageStop, events[5].Event)
-}
-
-func TestParseSSEStream_Empty(t *testing.T) {
-	ch := ParseSSEStream(strings.NewReader(""))
-	var events []SSEEvent
-	for ev := range ch {
-		events = append(events, ev)
-	}
-	assert.Empty(t, events)
-}
-
 func TestStreamAccumulator_MessageDelta_FullUsage(t *testing.T) {
 	sa := newStreamAccumulator()
 
@@ -491,17 +444,3 @@ func TestStreamAccumulator_WebSearchToolResultBlock(t *testing.T) {
 	assert.Equal(t, "Search results here", sa.contentBlocks[0].Text)
 }
 
-func TestParseSSEStream_IncompleteEventAtEnd(t *testing.T) {
-	// Event with no trailing blank line at end
-	sseData := `event: ping
-data: {}`
-
-	ch := ParseSSEStream(strings.NewReader(sseData))
-	var events []SSEEvent
-	for ev := range ch {
-		events = append(events, ev)
-	}
-	// Should still emit the event from the "remaining" handler
-	require.Len(t, events, 1)
-	assert.Equal(t, "ping", events[0].Event)
-}

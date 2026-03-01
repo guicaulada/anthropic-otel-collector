@@ -63,6 +63,45 @@ func TestUsage_TotalInputTokens(t *testing.T) {
 	}
 }
 
+// --- ToolChoiceType tests ---
+
+func TestAnthropicRequest_ToolChoiceType(t *testing.T) {
+	t.Run("nil tool_choice", func(t *testing.T) {
+		req := &AnthropicRequest{}
+		assert.Equal(t, "", req.ToolChoiceType())
+	})
+
+	t.Run("null tool_choice", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`null`)}
+		assert.Equal(t, "", req.ToolChoiceType())
+	})
+
+	t.Run("auto", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`{"type":"auto"}`)}
+		assert.Equal(t, "auto", req.ToolChoiceType())
+	})
+
+	t.Run("any", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`{"type":"any"}`)}
+		assert.Equal(t, "any", req.ToolChoiceType())
+	})
+
+	t.Run("tool with name", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`{"type":"tool","name":"my_tool"}`)}
+		assert.Equal(t, "tool", req.ToolChoiceType())
+	})
+
+	t.Run("none", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`{"type":"none"}`)}
+		assert.Equal(t, "none", req.ToolChoiceType())
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		req := &AnthropicRequest{ToolChoice: json.RawMessage(`invalid`)}
+		assert.Equal(t, "", req.ToolChoiceType())
+	})
+}
+
 // --- CacheHitRatio tests ---
 
 func TestCacheHitRatio(t *testing.T) {

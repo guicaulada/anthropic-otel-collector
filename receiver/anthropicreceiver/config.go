@@ -31,6 +31,9 @@ type Config struct {
 	// RateLimitWarningThreshold is the utilization ratio above which a warning is emitted.
 	RateLimitWarningThreshold float64 `mapstructure:"rate_limit_warning_threshold"`
 
+	// MaxRequestBodySize is the max size in bytes for incoming request bodies (default: 10MB).
+	MaxRequestBodySize int64 `mapstructure:"max_request_body_size"`
+
 	// ParseToolCalls enables parsing of tool_use content blocks for code metrics.
 	ParseToolCalls bool `mapstructure:"parse_tool_calls"`
 
@@ -57,6 +60,9 @@ func (cfg *Config) Validate() error {
 	if cfg.MaxBodyCaptureSize < 0 {
 		return fmt.Errorf("max_body_capture_size must be non-negative, got %d", cfg.MaxBodyCaptureSize)
 	}
+	if cfg.MaxRequestBodySize < 0 {
+		return fmt.Errorf("max_request_body_size must be non-negative, got %d", cfg.MaxRequestBodySize)
+	}
 	if cfg.RateLimitWarningThreshold < 0 || cfg.RateLimitWarningThreshold > 1 {
 		return fmt.Errorf("rate_limit_warning_threshold must be between 0 and 1, got %f", cfg.RateLimitWarningThreshold)
 	}
@@ -78,6 +84,7 @@ func defaultConfig() *Config {
 			},
 		},
 		AnthropicAPI:              "https://api.anthropic.com",
+		MaxRequestBodySize:        10 * 1024 * 1024, // 10MB
 		CaptureRequestBody:        false,
 		CaptureResponseBody:       false,
 		MaxBodyCaptureSize:        65536,

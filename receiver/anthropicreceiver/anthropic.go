@@ -295,6 +295,21 @@ func (r *AnthropicRequest) MessageRoleCounts() map[string]int {
 	return counts
 }
 
+// ToolChoiceType extracts the type of tool_choice from the request.
+// Returns "auto", "any", "tool", "none", or "" if not set.
+func (r *AnthropicRequest) ToolChoiceType() string {
+	if r.ToolChoice == nil || len(r.ToolChoice) == 0 || string(r.ToolChoice) == "null" {
+		return ""
+	}
+	var tc struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(r.ToolChoice, &tc); err != nil {
+		return ""
+	}
+	return tc.Type
+}
+
 // CacheHitRatio returns the ratio of cache read tokens to total input tokens.
 func CacheHitRatio(usage Usage) float64 {
 	total := usage.TotalInputTokens()
