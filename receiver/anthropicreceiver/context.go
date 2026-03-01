@@ -29,7 +29,7 @@ type ClaudeCodeContext struct {
 // workingDirPattern matches "Primary working directory: /path/to/project" in system prompts.
 var workingDirPattern = regexp.MustCompile(`Primary working directory:\s*(\S+)`)
 
-// ExtractClaudeCodeContext detects Claude Code requests and extracts session-relevant context.
+// ExtractClaudeCodeContext detects Claude Code requests and extracts request-relevant context.
 func ExtractClaudeCodeContext(req *AnthropicRequest, betaFeatures string) ClaudeCodeContext {
 	ctx := ClaudeCodeContext{}
 
