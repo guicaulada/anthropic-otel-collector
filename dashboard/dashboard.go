@@ -36,7 +36,6 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.AvgCostPerRequestTimeseries()).
 		WithPanel(panels.CostPerOutputToken()).
 		WithPanel(panels.CacheSavingsOverTime()).
-		WithPanel(panels.CreditUsageOverTime()).
 		WithPanel(panels.WebSearchCost()).
 		// Row 3: Token Usage
 		WithRow(dashboard.NewRowBuilder("Token Usage")).
@@ -69,7 +68,6 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithRow(dashboard.NewRowBuilder("Rate Limits")).
 		WithPanel(panels.RequestRateLimitUtilization()).
 		WithPanel(panels.InputTokenRateLimitUtilization()).
-		WithPanel(panels.OutputTokenRateLimitUtilization()).
 		WithPanel(panels.RateLimitUtilizationOverTime()).
 		WithPanel(panels.RateLimitRemaining()).
 		// Row 7: Model & Request Analysis
@@ -77,11 +75,10 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.RequestsByModel()).
 		WithPanel(panels.StopReasons()).
 		WithPanel(panels.ContentBlockTypes()).
-		WithPanel(panels.RequestsBySpeed()).
+		WithPanel(panels.ServerToolUse()).
 		WithPanel(panels.AvgMessagesPerRequest()).
 		WithPanel(panels.AvgSystemPromptSize()).
 		WithPanel(panels.ThinkingEnabledRequests()).
-		WithPanel(panels.ServerToolUse()).
 		// Row 8: Streaming
 		WithRow(dashboard.NewRowBuilder("Streaming")).
 		WithPanel(panels.AvgStreamingDuration()).

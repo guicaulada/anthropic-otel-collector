@@ -190,7 +190,7 @@ func ServerToolUse() cog.Builder[dashboard.Panel] {
 		Description("Server-side tool usage over the selected range").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(6).
 		WithTarget(instantQuery(
 			fmt.Sprintf(`sum(increase(%s{%s}[$__range]))`, MetricServerToolWebSearch, filter),
 			"Web Search",

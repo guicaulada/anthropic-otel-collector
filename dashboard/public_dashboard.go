@@ -40,13 +40,12 @@ func buildPublicDashboard() (dashboard.Dashboard, error) {
 		WithRow(dashboard.NewRowBuilder("Tool Usage")).
 		WithPanel(panels.ToolCallDistribution()).
 		WithPanel(panels.ToolCallsOverTime()).
-		WithPanel(panels.ServerToolUse()).
 		// Row 5: AI Insights
 		WithRow(dashboard.NewRowBuilder("AI Insights")).
 		WithPanel(panels.RequestsByModel()).
 		WithPanel(panels.StopReasons()).
 		WithPanel(panels.ContentBlockTypes()).
-		WithPanel(panels.RequestsBySpeed()).
+		WithPanel(panels.ServerToolUse()).
 		WithPanel(panels.AvgMessagesPerRequest()).
 		WithPanel(panels.StreamingVsNonStreaming())
 

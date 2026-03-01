@@ -147,7 +147,7 @@ func CacheSavingsOverTime() cog.Builder[dashboard.Panel] {
 		Description("Estimated cache savings rate in $/hr").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(12).
 		Unit("currencyUSD").
 		Legend(defaultLegend()).
 		Tooltip(multiTooltip()).
@@ -185,7 +185,7 @@ func WebSearchCost() cog.Builder[dashboard.Panel] {
 		Description("Web search server tool cost rate in $/hr").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(12).
 		Unit("currencyUSD").
 		Legend(defaultLegend()).
 		Tooltip(multiTooltip()).

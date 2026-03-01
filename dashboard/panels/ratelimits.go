@@ -13,7 +13,7 @@ func RequestRateLimitUtilization() cog.Builder[dashboard.Panel] {
 		Title("Request Rate Limit Utilization").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(12).
 		WithTarget(
 			promInstantQuery(
 				`avg(anthropic_ratelimit_requests_utilization_ratio{`+filter+`})`,
@@ -32,7 +32,7 @@ func InputTokenRateLimitUtilization() cog.Builder[dashboard.Panel] {
 		Title("Input Token Rate Limit Utilization").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(8).
+		Span(12).
 		WithTarget(
 			promInstantQuery(
 				`avg(anthropic_ratelimit_input_tokens_utilization_ratio{`+filter+`})`,
