@@ -281,6 +281,124 @@ func TestEmitMetrics_ActiveRequests(t *testing.T) {
 	assert.True(t, metricNames["anthropic.requests.active"])
 }
 
+func TestEmitMetrics_SessionMetrics(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:     "ses_test123",
+		ProjectPath:   "/home/user/my-project",
+		ProjectName:   "my-project",
+		RequestNumber: 1,
+		IsNewSession:  true,
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.True(t, metricNames["claude_code.session.requests"], "should have session requests metric")
+	assert.True(t, metricNames["claude_code.session.active_duration"], "should have session active duration metric")
+	assert.True(t, metricNames["claude_code.session.cost"], "should have session cost metric")
+	assert.True(t, metricNames["claude_code.session.tokens.input"], "should have session input tokens metric")
+	assert.True(t, metricNames["claude_code.session.tokens.output"], "should have session output tokens metric")
+	assert.True(t, metricNames["claude_code.project.requests"], "should have project requests metric")
+	assert.True(t, metricNames["claude_code.project.cost"], "should have project cost metric")
+}
+
+func TestEmitMetrics_NoSessionMetrics(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	// No session set
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+
+	assert.False(t, metricNames["claude_code.session.requests"], "should not have session metrics without session")
+	assert.False(t, metricNames["claude_code.project.requests"], "should not have project metrics without session")
+}
+
+func TestEmitMetrics_ProjectNameInCommonAttrs(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_test",
+		ProjectName: "my-project",
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	// Check that the first metric (gen_ai.client.operation.duration) has project name
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "gen_ai.client.operation.duration" {
+			dp := m.Histogram().DataPoints().At(0)
+			val, ok := dp.Attributes().Get("claude_code.project.name")
+			require.True(t, ok, "should have project name in common attrs")
+			assert.Equal(t, "my-project", val.Str())
+			return
+		}
+	}
+	t.Fatal("gen_ai.client.operation.duration metric not found")
+}
+
+func TestEmitMetrics_DuplicateToolCallsRemoved(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.response.Content = append(data.response.Content, ContentBlock{
+		Type: "tool_use",
+		Name: "Edit",
+		ID:   "tc_1",
+	})
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	for i := 0; i < allMetrics.Len(); i++ {
+		assert.NotEqual(t, "anthropic.tool_calls", allMetrics.At(i).Name(), "anthropic.tool_calls should be removed (duplicate of anthropic.tool_use.calls)")
+	}
+}
+
+func TestEmitMetrics_OutputTokensRateLimitGuarded(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.rateLimit.OutputTokensLimit = 0 // API never returns these
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	for i := 0; i < allMetrics.Len(); i++ {
+		assert.NotEqual(t, "anthropic.ratelimit.output_tokens.limit", allMetrics.At(i).Name(), "should not emit output_tokens.limit when limit is 0")
+	}
+}
+
 func TestEmitMetrics_ConversationTurns(t *testing.T) {
 	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
 	data := newTestRequestData()

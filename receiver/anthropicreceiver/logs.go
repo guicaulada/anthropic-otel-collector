@@ -14,6 +14,11 @@ func (tb *telemetryBuilder) emitLogs(ctx context.Context, data *requestData) err
 	sl := rl.ScopeLogs().AppendEmpty()
 	sl.Scope().SetName("github.com/guicaulada/anthropic-otel-collector/receiver/anthropicreceiver")
 
+	// Log 0: Session started (if new session)
+	if data.session != nil && data.session.IsNewSession {
+		tb.addSessionStartedLog(sl, data)
+	}
+
 	// Log 1: Request/Response detail
 	tb.addOperationLog(sl, data)
 
@@ -167,6 +172,17 @@ func (tb *telemetryBuilder) addOperationLog(sl plog.ScopeLogs, data *requestData
 		body.PutStr("anthropic.cost.multiplier", data.cost.Multiplier)
 	}
 
+	// Session context
+	if data.session != nil {
+		body.PutStr("claude_code.session.id", data.session.SessionID)
+		if data.session.ProjectName != "" {
+			body.PutStr("claude_code.project.name", data.session.ProjectName)
+		}
+		if data.session.ProjectPath != "" {
+			body.PutStr("claude_code.project.path", data.session.ProjectPath)
+		}
+	}
+
 	// Attributes: rate limits + api key hash
 	attrs := lr.Attributes()
 	if data.apiKeyHash != "" {
@@ -179,6 +195,15 @@ func (tb *telemetryBuilder) addOperationLog(sl plog.ScopeLogs, data *requestData
 		attrs.PutInt("anthropic.ratelimit.input_tokens.remaining", int64(data.rateLimit.InputTokensRemaining))
 		attrs.PutInt("anthropic.ratelimit.output_tokens.limit", int64(data.rateLimit.OutputTokensLimit))
 		attrs.PutInt("anthropic.ratelimit.output_tokens.remaining", int64(data.rateLimit.OutputTokensRemaining))
+	}
+	if data.session != nil {
+		attrs.PutStr("claude_code.session.id", data.session.SessionID)
+		if data.session.ProjectName != "" {
+			attrs.PutStr("claude_code.project.name", data.session.ProjectName)
+		}
+		if data.session.ProjectPath != "" {
+			attrs.PutStr("claude_code.project.path", data.session.ProjectPath)
+		}
 	}
 }
 
@@ -365,6 +390,30 @@ func (tb *telemetryBuilder) addStreamingSummaryLog(sl plog.ScopeLogs, data *requ
 	if data.streaming.AvgTimePerToken > 0 {
 		attrs.PutDouble("anthropic.streaming.avg_time_per_token_ms", float64(data.streaming.AvgTimePerToken.Milliseconds()))
 	}
+}
+
+func (tb *telemetryBuilder) addSessionStartedLog(sl plog.ScopeLogs, data *requestData) {
+	lr := sl.LogRecords().AppendEmpty()
+	lr.SetTimestamp(pcommon.NewTimestampFromTime(data.startTime))
+	lr.SetObservedTimestamp(pcommon.NewTimestampFromTime(data.startTime))
+	lr.SetSeverityNumber(plog.SeverityNumberInfo)
+	lr.SetSeverityText("INFO")
+
+	lr.Body().SetStr("Session started")
+
+	attrs := lr.Attributes()
+	attrs.PutStr("event.name", "claude_code.session.started")
+	attrs.PutStr("claude_code.session.id", data.session.SessionID)
+	if data.session.ProjectName != "" {
+		attrs.PutStr("claude_code.project.name", data.session.ProjectName)
+	}
+	if data.session.ProjectPath != "" {
+		attrs.PutStr("claude_code.project.path", data.session.ProjectPath)
+	}
+	if data.session.UserID != "" {
+		attrs.PutStr("claude_code.user_id", data.session.UserID)
+	}
+	attrs.PutStr("gen_ai.request.model", data.requestModel())
 }
 
 func (tb *telemetryBuilder) addNotableStopReasonLog(sl plog.ScopeLogs, data *requestData) {

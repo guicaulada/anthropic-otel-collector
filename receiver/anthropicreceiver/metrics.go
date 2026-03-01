@@ -95,6 +95,9 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		m.PutStr("server.address", tb.serverHost)
 		m.PutInt("server.port", int64(tb.serverPort))
 		m.PutStr("http.request.method", "POST")
+		if data.session != nil && data.session.ProjectName != "" {
+			m.PutStr("claude_code.project.name", data.session.ProjectName)
+		}
 		return m
 	}
 
@@ -161,13 +164,6 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		stopAttrs.PutStr("stop_reason", data.response.StopReason)
 		tb.addSumDP(sm, "anthropic.stop_reason", "{request}", start, now, 1, stopAttrs)
 
-		// 34. anthropic.tool_calls
-		for _, block := range data.response.ToolCalls() {
-			tcAttrs := commonAttrs()
-			tcAttrs.PutStr("tool.name", block.Name)
-			tb.addSumDP(sm, "anthropic.tool_calls", "{call}", start, now, 1, tcAttrs)
-		}
-
 		// 35. anthropic.content_blocks
 		for blockType, count := range data.response.ContentBlockCounts() {
 			cbAttrs := commonAttrs()
@@ -192,9 +188,11 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		tb.addGaugeDP(sm, "anthropic.ratelimit.input_tokens.limit", "{token}", start, now, float64(data.rateLimit.InputTokensLimit), commonAttrs())
 		tb.addGaugeDP(sm, "anthropic.ratelimit.input_tokens.remaining", "{token}", start, now, float64(data.rateLimit.InputTokensRemaining), commonAttrs())
 		tb.addGaugeDP(sm, "anthropic.ratelimit.input_tokens.utilization", "1", start, now, data.rateLimit.InputTokensUtilization(), commonAttrs())
-		tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.limit", "{token}", start, now, float64(data.rateLimit.OutputTokensLimit), commonAttrs())
-		tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.remaining", "{token}", start, now, float64(data.rateLimit.OutputTokensRemaining), commonAttrs())
-		tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.utilization", "1", start, now, data.rateLimit.OutputTokensUtilization(), commonAttrs())
+		if data.rateLimit.OutputTokensLimit > 0 {
+			tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.limit", "{token}", start, now, float64(data.rateLimit.OutputTokensLimit), commonAttrs())
+			tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.remaining", "{token}", start, now, float64(data.rateLimit.OutputTokensRemaining), commonAttrs())
+			tb.addGaugeDP(sm, "anthropic.ratelimit.output_tokens.utilization", "1", start, now, data.rateLimit.OutputTokensUtilization(), commonAttrs())
+		}
 	}
 
 	// Request parameter metrics (28-32)
@@ -221,7 +219,9 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		// 37-38. Thinking metrics
 		if data.request.Thinking != nil {
 			tb.addSumDP(sm, "anthropic.thinking.enabled", "{request}", start, now, 1, commonAttrs())
-			tb.addHistogramDP(sm, "anthropic.thinking.budget_tokens", "{token}", start, now, float64(data.request.Thinking.BudgetTokens), commonAttrs())
+			if data.request.Thinking.BudgetTokens > 0 {
+				tb.addHistogramDP(sm, "anthropic.thinking.budget_tokens", "{token}", start, now, float64(data.request.Thinking.BudgetTokens), commonAttrs())
+			}
 		}
 	}
 
@@ -354,6 +354,36 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		multAttrs := commonAttrs()
 		multAttrs.PutStr("multiplier", data.cost.Multiplier)
 		tb.addSumDP(sm, "anthropic.cost.multiplied_requests", "{request}", start, now, 1, multAttrs)
+	}
+
+	// Claude Code session and project metrics
+	if data.session != nil {
+		sessionAttrs := func() pcommon.Map {
+			m := pcommon.NewMap()
+			m.PutStr("claude_code.session.id", data.session.SessionID)
+			if data.session.ProjectName != "" {
+				m.PutStr("claude_code.project.name", data.session.ProjectName)
+			}
+			return m
+		}
+
+		tb.addSumDP(sm, "claude_code.session.requests", "{request}", start, now, 1, sessionAttrs())
+		tb.addSumDPf(sm, "claude_code.session.active_duration", "s", start, now, duration, sessionAttrs())
+		tb.addSumDPf(sm, "claude_code.session.cost", "{USD}", start, now, data.cost.TotalCost, sessionAttrs())
+
+		if data.response != nil {
+			tb.addSumDP(sm, "claude_code.session.tokens.input", "{token}", start, now, int64(data.response.Usage.TotalInputTokens()), sessionAttrs())
+			tb.addSumDP(sm, "claude_code.session.tokens.output", "{token}", start, now, int64(data.response.Usage.OutputTokens), sessionAttrs())
+		}
+
+		// Project-level metrics (without session.id to avoid cardinality explosion)
+		if data.session.ProjectName != "" {
+			projectAttrs := pcommon.NewMap()
+			projectAttrs.PutStr("claude_code.project.name", data.session.ProjectName)
+
+			tb.addSumDP(sm, "claude_code.project.requests", "{request}", start, now, 1, projectAttrs)
+			tb.addSumDPf(sm, "claude_code.project.cost", "{USD}", start, now, data.cost.TotalCost, projectAttrs)
+		}
 	}
 
 	return tb.metricsConsumer.ConsumeMetrics(ctx, md)

@@ -362,6 +362,104 @@ func TestEmitLogs_NotableStopReason_NormalEndTurn(t *testing.T) {
 	}
 }
 
+func TestEmitLogs_SessionStartedLog(t *testing.T) {
+	tb, _, _, logsSink := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:     "ses_new123",
+		ProjectPath:   "/home/user/my-project",
+		ProjectName:   "my-project",
+		UserID:        "user-abc",
+		RequestNumber: 1,
+		IsNewSession:  true,
+	}
+
+	err := tb.emitLogs(context.Background(), data)
+	require.NoError(t, err)
+
+	logs := logsSink.AllLogs()
+	require.Len(t, logs, 1)
+
+	logRecords := logs[0].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+	var foundSessionStarted bool
+	for i := 0; i < logRecords.Len(); i++ {
+		lr := logRecords.At(i)
+		eventName, ok := lr.Attributes().Get("event.name")
+		if ok && eventName.Str() == "claude_code.session.started" {
+			foundSessionStarted = true
+			assert.Equal(t, "Session started", lr.Body().Str())
+			sessionID, _ := lr.Attributes().Get("claude_code.session.id")
+			assert.Equal(t, "ses_new123", sessionID.Str())
+			projectName, _ := lr.Attributes().Get("claude_code.project.name")
+			assert.Equal(t, "my-project", projectName.Str())
+			userID, _ := lr.Attributes().Get("claude_code.user_id")
+			assert.Equal(t, "user-abc", userID.Str())
+		}
+	}
+	assert.True(t, foundSessionStarted, "should have session started log for new session")
+}
+
+func TestEmitLogs_NoSessionStartedForExistingSession(t *testing.T) {
+	tb, _, _, logsSink := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:     "ses_existing",
+		ProjectPath:   "/home/user/project",
+		ProjectName:   "project",
+		RequestNumber: 5,
+		IsNewSession:  false,
+	}
+
+	err := tb.emitLogs(context.Background(), data)
+	require.NoError(t, err)
+
+	logs := logsSink.AllLogs()
+	require.Len(t, logs, 1)
+
+	logRecords := logs[0].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+	for i := 0; i < logRecords.Len(); i++ {
+		lr := logRecords.At(i)
+		eventName, ok := lr.Attributes().Get("event.name")
+		if ok {
+			assert.NotEqual(t, "claude_code.session.started", eventName.Str(), "should not emit session started log for existing session")
+		}
+	}
+}
+
+func TestEmitLogs_SessionContextInOperationLog(t *testing.T) {
+	tb, _, _, logsSink := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.session = &SessionContext{
+		SessionID:   "ses_op123",
+		ProjectPath: "/home/user/my-project",
+		ProjectName: "my-project",
+	}
+
+	err := tb.emitLogs(context.Background(), data)
+	require.NoError(t, err)
+
+	logs := logsSink.AllLogs()
+	require.Len(t, logs, 1)
+
+	firstLog := logs[0].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+
+	// Check body has session context
+	bodyMap := firstLog.Body().Map()
+	val, ok := bodyMap.Get("claude_code.session.id")
+	require.True(t, ok, "should have session.id in operation log body")
+	assert.Equal(t, "ses_op123", val.Str())
+
+	val, ok = bodyMap.Get("claude_code.project.name")
+	require.True(t, ok, "should have project.name in operation log body")
+	assert.Equal(t, "my-project", val.Str())
+
+	// Check attributes have session context
+	attrs := firstLog.Attributes()
+	val, ok = attrs.Get("claude_code.session.id")
+	require.True(t, ok, "should have session.id in operation log attrs")
+	assert.Equal(t, "ses_op123", val.Str())
+}
+
 func TestEmitLogs_OperationLog_NewFields(t *testing.T) {
 	tb, _, _, logsSink := newTestTelemetryBuilder(t)
 	data := newTestRequestData()
