@@ -18,6 +18,14 @@ func buildDashboard() (dashboard.Dashboard, error) {
 		Timezone("browser").
 		Tooltip(dashboard.DashboardCursorSyncCrosshair).
 		Variables(buildVariables()).
+		// Row 0: Sessions & Projects
+		WithRow(dashboard.NewRowBuilder("Sessions & Projects")).
+		WithPanel(panels.ActiveSessions()).
+		WithPanel(panels.SessionCostBreakdown()).
+		WithPanel(panels.ProjectCostBreakdown()).
+		WithPanel(panels.SessionRequestsOverTime()).
+		WithPanel(panels.SessionActiveDuration()).
+		WithPanel(panels.ProjectRequestsOverTime()).
 		// Row 1: Overview
 		WithRow(dashboard.NewRowBuilder("Overview")).
 		WithPanel(panels.TotalCost()).
@@ -135,10 +143,25 @@ func buildVariables() []cog.Builder[dashboard.VariableModel] {
 		Multi(true).
 		Sort(dashboard.VariableSortAlphabeticalAsc)
 
+	projectQuery := "label_values(" + MetricProjectRequests + ", claude_code_project_name)"
+	projectVar := dashboard.NewQueryVariableBuilder("project").
+		Label("Project").
+		Datasource(common.DataSourceRef{
+			Uid:  strPtr("$datasource"),
+			Type: strPtr("prometheus"),
+		}).
+		Query(dashboard.StringOrMap{String: &projectQuery}).
+		Refresh(dashboard.VariableRefreshOnTimeRangeChanged).
+		IncludeAll(true).
+		AllValue(".*").
+		Multi(true).
+		Sort(dashboard.VariableSortAlphabeticalAsc)
+
 	return []cog.Builder[dashboard.VariableModel]{
 		dsVar,
 		modelVar,
 		apiKeyVar,
+		projectVar,
 	}
 }
 
