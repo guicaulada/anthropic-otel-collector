@@ -16,6 +16,7 @@ type streamAccumulator struct {
 	stopReason   string
 	stopSequence *string
 	usage        Usage
+	container    *Container
 
 	// Content blocks
 	contentBlocks []ContentBlock
@@ -41,6 +42,7 @@ type accumulatorBlock struct {
 	name      string
 	id        string
 	inputJSON strings.Builder
+	data      string
 }
 
 // newStreamAccumulator creates a new stream accumulator.
@@ -87,6 +89,7 @@ func (sa *streamAccumulator) handleMessageStart(data json.RawMessage) error {
 	sa.model = d.Message.Model
 	sa.role = d.Message.Role
 	sa.usage = d.Message.Usage
+	sa.container = d.Message.Container
 	return nil
 }
 
@@ -101,6 +104,10 @@ func (sa *streamAccumulator) handleContentBlockStart(data json.RawMessage) error
 		startTime: time.Now(),
 		name:      d.ContentBlock.Name,
 		id:        d.ContentBlock.ID,
+	}
+	// redacted_thinking blocks arrive complete in content_block_start (no deltas)
+	if d.ContentBlock.Type == "redacted_thinking" {
+		sa.currentBlock.data = d.ContentBlock.Data
 	}
 	return nil
 }
@@ -153,6 +160,8 @@ func (sa *streamAccumulator) handleContentBlockStop(data json.RawMessage) error 
 		block.Text = sa.currentBlock.text.String()
 	case "thinking":
 		block.Thinking = sa.currentBlock.thinking.String()
+	case "redacted_thinking":
+		block.Data = sa.currentBlock.data
 	case "tool_use":
 		block.Input = json.RawMessage(sa.currentBlock.inputJSON.String())
 	case "server_tool_use":
@@ -202,6 +211,7 @@ func (sa *streamAccumulator) Response() *AnthropicResponse {
 		StopReason:   sa.stopReason,
 		StopSequence: sa.stopSequence,
 		Usage:        sa.usage,
+		Container:    sa.container,
 	}
 }
 

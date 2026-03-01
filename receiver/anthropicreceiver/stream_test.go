@@ -415,6 +415,133 @@ func TestStreamAccumulator_ServerToolUseBlock(t *testing.T) {
 	assert.NotEmpty(t, sa.contentBlocks[0].Input)
 }
 
+func TestStreamAccumulator_RedactedThinkingBlock(t *testing.T) {
+	sa := newStreamAccumulator()
+
+	// redacted_thinking arrives complete in content_block_start
+	startData := `{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"aGVsbG8gd29ybGQ="}}`
+	err := sa.ProcessEvent(SSEEvent{
+		Event: SSEEventContentBlockStart,
+		Data:  json.RawMessage(startData),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, sa.currentBlock)
+	assert.Equal(t, "redacted_thinking", sa.currentBlock.blockType)
+	assert.Equal(t, "aGVsbG8gd29ybGQ=", sa.currentBlock.data)
+
+	// No deltas expected, straight to stop
+	stopData := `{"type":"content_block_stop","index":0}`
+	err = sa.ProcessEvent(SSEEvent{
+		Event: SSEEventContentBlockStop,
+		Data:  json.RawMessage(stopData),
+	})
+	require.NoError(t, err)
+
+	require.Len(t, sa.contentBlocks, 1)
+	assert.Equal(t, "redacted_thinking", sa.contentBlocks[0].Type)
+	assert.Equal(t, "aGVsbG8gd29ybGQ=", sa.contentBlocks[0].Data)
+}
+
+func TestStreamAccumulator_RedactedThinkingInFullStream(t *testing.T) {
+	sa := newStreamAccumulator()
+
+	events := []SSEEvent{
+		{
+			Event: SSEEventMessageStart,
+			Data:  json.RawMessage(`{"type":"message_start","message":{"id":"msg_rt","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":50,"output_tokens":0}}}`),
+		},
+		{
+			Event: SSEEventContentBlockStart,
+			Data:  json.RawMessage(`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`),
+		},
+		{
+			Event: SSEEventContentBlockDelta,
+			Data:  json.RawMessage(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"visible thought"}}`),
+		},
+		{
+			Event: SSEEventContentBlockStop,
+			Data:  json.RawMessage(`{"type":"content_block_stop","index":0}`),
+		},
+		{
+			Event: SSEEventContentBlockStart,
+			Data:  json.RawMessage(`{"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"c2VjcmV0"}}`),
+		},
+		{
+			Event: SSEEventContentBlockStop,
+			Data:  json.RawMessage(`{"type":"content_block_stop","index":1}`),
+		},
+		{
+			Event: SSEEventContentBlockStart,
+			Data:  json.RawMessage(`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`),
+		},
+		{
+			Event: SSEEventContentBlockDelta,
+			Data:  json.RawMessage(`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Answer"}}`),
+		},
+		{
+			Event: SSEEventContentBlockStop,
+			Data:  json.RawMessage(`{"type":"content_block_stop","index":2}`),
+		},
+		{
+			Event: SSEEventMessageDelta,
+			Data:  json.RawMessage(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`),
+		},
+		{
+			Event: SSEEventMessageStop,
+			Data:  json.RawMessage(`{}`),
+		},
+	}
+
+	for _, ev := range events {
+		err := sa.ProcessEvent(ev)
+		require.NoError(t, err)
+	}
+
+	resp := sa.Response()
+	require.Len(t, resp.Content, 3)
+	assert.Equal(t, "thinking", resp.Content[0].Type)
+	assert.Equal(t, "visible thought", resp.Content[0].Thinking)
+	assert.Equal(t, "redacted_thinking", resp.Content[1].Type)
+	assert.Equal(t, "c2VjcmV0", resp.Content[1].Data)
+	assert.Equal(t, "text", resp.Content[2].Type)
+	assert.Equal(t, "Answer", resp.Content[2].Text)
+}
+
+func TestStreamAccumulator_ContainerFromMessageStart(t *testing.T) {
+	sa := newStreamAccumulator()
+
+	data := `{"type":"message_start","message":{"id":"msg_ctr","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0},"container":{"id":"ctr_abc123","expires_at":"2025-06-01T12:00:00Z"}}}`
+
+	err := sa.ProcessEvent(SSEEvent{
+		Event: SSEEventMessageStart,
+		Data:  json.RawMessage(data),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, sa.container)
+	assert.Equal(t, "ctr_abc123", sa.container.ID)
+	assert.Equal(t, "2025-06-01T12:00:00Z", sa.container.ExpiresAt)
+
+	resp := sa.Response()
+	require.NotNil(t, resp.Container)
+	assert.Equal(t, "ctr_abc123", resp.Container.ID)
+}
+
+func TestStreamAccumulator_NoContainer(t *testing.T) {
+	sa := newStreamAccumulator()
+
+	data := `{"type":"message_start","message":{"id":"msg_no_ctr","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}`
+
+	err := sa.ProcessEvent(SSEEvent{
+		Event: SSEEventMessageStart,
+		Data:  json.RawMessage(data),
+	})
+	require.NoError(t, err)
+	assert.Nil(t, sa.container)
+
+	resp := sa.Response()
+	assert.Nil(t, resp.Container)
+}
+
 func TestStreamAccumulator_WebSearchToolResultBlock(t *testing.T) {
 	sa := newStreamAccumulator()
 
