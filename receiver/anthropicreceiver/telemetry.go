@@ -102,6 +102,9 @@ type requestData struct {
 	// Error
 	errorResponse *AnthropicError
 
+	// Active requests
+	activeRequests int64
+
 	// Additional metadata
 	betaFeatures   string
 	organizationID string

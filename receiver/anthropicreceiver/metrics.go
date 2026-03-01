@@ -9,6 +9,56 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
+// histogramBuckets maps metric names to explicit histogram bucket boundaries.
+// These enable histogram_quantile() in Prometheus by providing the bucket
+// structure needed for quantile estimation.
+var histogramBuckets = map[string][]float64{
+	// Duration metrics (seconds)
+	"gen_ai.client.operation.duration":             {0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	"anthropic.upstream.latency":                   {0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	"anthropic.streaming.duration":                 {0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	"anthropic.streaming.content_block.duration":   {0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+
+	// Time to first token (seconds)
+	"gen_ai.server.time_to_first_token": {0.1, 0.25, 0.5, 1, 2, 5, 10},
+
+	// Time per output token (seconds)
+	"gen_ai.server.time_per_output_token": {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25},
+
+	// Body size (bytes)
+	"anthropic.request.body.size":  {256, 1024, 4096, 16384, 65536, 262144, 1048576},
+	"anthropic.response.body.size": {256, 1024, 4096, 16384, 65536, 262144, 1048576},
+
+	// Token counts
+	"anthropic.request.max_tokens":     {10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000},
+	"anthropic.thinking.budget_tokens": {10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000},
+
+	// Cost per request (USD)
+	"anthropic.cost.request": {0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0},
+
+	// Character lengths
+	"anthropic.response.text_length":       {10, 50, 100, 500, 1000, 5000, 10000, 50000},
+	"anthropic.thinking.output_length":     {10, 50, 100, 500, 1000, 5000, 10000, 50000},
+	"anthropic.request.system_prompt.size": {10, 50, 100, 500, 1000, 5000, 10000, 50000},
+	"anthropic.tool_use.edit_size":         {10, 50, 100, 500, 1000, 5000, 10000, 50000},
+	"anthropic.tool_use.write_size":        {10, 50, 100, 500, 1000, 5000, 10000, 50000},
+
+	// Message counts
+	"anthropic.request.messages_count": {1, 2, 5, 10, 20, 50, 100},
+
+	// Tool counts
+	"anthropic.request.tools_count": {0, 1, 2, 5, 10, 20},
+
+	// Temperature
+	"anthropic.request.temperature": {0, 0.1, 0.25, 0.5, 0.75, 1.0},
+
+	// Streaming chunks
+	"anthropic.streaming.chunks": {1, 5, 10, 50, 100, 500, 1000},
+
+	// Conversation turns
+	"anthropic.request.conversation_turns": {1, 2, 5, 10, 20, 50, 100},
+}
+
 func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) error {
 	md := pmetric.NewMetrics()
 	rm := md.ResourceMetrics().AppendEmpty()
@@ -157,6 +207,17 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		tb.addHistogramDP(sm, "anthropic.request.system_prompt.size", "{char}", start, now, float64(data.request.SystemPromptSize()), commonAttrs())
 		tb.addHistogramDP(sm, "anthropic.request.tools_count", "{tool}", start, now, float64(len(data.request.Tools)), commonAttrs())
 
+		// Conversation depth: count assistant messages as turns
+		assistantTurns := 0
+		for _, msg := range data.request.Messages {
+			if msg.Role == "assistant" {
+				assistantTurns++
+			}
+		}
+		if assistantTurns > 0 {
+			tb.addHistogramDP(sm, "anthropic.request.conversation_turns", "{turn}", start, now, float64(assistantTurns), commonAttrs())
+		}
+
 		// 37-38. Thinking metrics
 		if data.request.Thinking != nil {
 			tb.addSumDP(sm, "anthropic.thinking.enabled", "{request}", start, now, 1, commonAttrs())
@@ -285,6 +346,9 @@ func (tb *telemetryBuilder) emitMetrics(ctx context.Context, data *requestData) 
 		}
 	}
 
+	// Active requests gauge
+	tb.addGaugeDP(sm, "anthropic.requests.active", "{request}", start, now, float64(data.activeRequests), commonAttrs())
+
 	// Cost multiplied requests counter
 	if data.cost.Multiplier != "" && data.cost.Multiplier != "standard" {
 		multAttrs := commonAttrs()
@@ -300,7 +364,7 @@ func (tb *telemetryBuilder) addHistogramDP(sm pmetric.ScopeMetrics, name, unit s
 	m.SetName(name)
 	m.SetUnit(unit)
 	h := m.SetEmptyHistogram()
-	h.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	h.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	dp := h.DataPoints().AppendEmpty()
 	dp.SetStartTimestamp(startTs)
 	dp.SetTimestamp(ts)
@@ -309,6 +373,21 @@ func (tb *telemetryBuilder) addHistogramDP(sm pmetric.ScopeMetrics, name, unit s
 	dp.SetMin(value)
 	dp.SetMax(value)
 	attrs.CopyTo(dp.Attributes())
+
+	// Populate explicit bucket boundaries when defined for this metric.
+	// Delta semantics: bucket[i] = 1 if value <= bounds[i], else 0.
+	// The +Inf bucket (index len(bounds)) always equals count (1).
+	if bounds, ok := histogramBuckets[name]; ok {
+		dp.ExplicitBounds().FromRaw(bounds)
+		counts := make([]uint64, len(bounds)+1)
+		for i, b := range bounds {
+			if value <= b {
+				counts[i] = 1
+			}
+		}
+		counts[len(bounds)] = 1 // +Inf bucket always equals count
+		dp.BucketCounts().FromRaw(counts)
+	}
 }
 
 func (tb *telemetryBuilder) addSumDP(sm pmetric.ScopeMetrics, name, unit string, startTs, ts pcommon.Timestamp, value int64, attrs pcommon.Map) {
@@ -316,7 +395,7 @@ func (tb *telemetryBuilder) addSumDP(sm pmetric.ScopeMetrics, name, unit string,
 	m.SetName(name)
 	m.SetUnit(unit)
 	s := m.SetEmptySum()
-	s.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	s.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	s.SetIsMonotonic(true)
 	dp := s.DataPoints().AppendEmpty()
 	dp.SetStartTimestamp(startTs)
@@ -330,7 +409,7 @@ func (tb *telemetryBuilder) addSumDPf(sm pmetric.ScopeMetrics, name, unit string
 	m.SetName(name)
 	m.SetUnit(unit)
 	s := m.SetEmptySum()
-	s.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	s.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	s.SetIsMonotonic(true)
 	dp := s.DataPoints().AppendEmpty()
 	dp.SetStartTimestamp(startTs)

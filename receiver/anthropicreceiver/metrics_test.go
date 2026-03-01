@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
 func TestEmitMetrics(t *testing.T) {
@@ -233,4 +234,73 @@ func TestEmitMetrics_CostMultipliedRequests(t *testing.T) {
 	}
 
 	assert.True(t, metricNames["anthropic.cost.multiplied_requests"])
+}
+
+func TestEmitMetrics_HistogramBuckets(t *testing.T) {
+	// Verify that histogram metrics have explicit bucket boundaries
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	// Find gen_ai.client.operation.duration histogram and check it has buckets
+	for i := 0; i < allMetrics.Len(); i++ {
+		m := allMetrics.At(i)
+		if m.Name() == "gen_ai.client.operation.duration" {
+			require.Equal(t, pmetric.MetricTypeHistogram, m.Type())
+			dp := m.Histogram().DataPoints().At(0)
+			assert.Greater(t, dp.ExplicitBounds().Len(), 0, "should have explicit bucket boundaries")
+			assert.Equal(t, dp.ExplicitBounds().Len()+1, dp.BucketCounts().Len(), "bucket counts should be bounds+1")
+			return
+		}
+	}
+	t.Fatal("gen_ai.client.operation.duration metric not found")
+}
+
+func TestEmitMetrics_ActiveRequests(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.activeRequests = 5
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+	assert.True(t, metricNames["anthropic.requests.active"])
+}
+
+func TestEmitMetrics_ConversationTurns(t *testing.T) {
+	tb, _, metricsSink, _ := newTestTelemetryBuilder(t)
+	data := newTestRequestData()
+	data.request.Messages = []Message{
+		{Role: "user", Content: []byte(`"Hello"`)},
+		{Role: "assistant", Content: []byte(`"Hi"`)},
+		{Role: "user", Content: []byte(`"How are you?"`)},
+		{Role: "assistant", Content: []byte(`"Good"`)},
+		{Role: "user", Content: []byte(`"Do something"`)},
+	}
+
+	err := tb.emitMetrics(context.Background(), data)
+	require.NoError(t, err)
+
+	metrics := metricsSink.AllMetrics()
+	allMetrics := metrics[0].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+
+	metricNames := make(map[string]bool)
+	for i := 0; i < allMetrics.Len(); i++ {
+		metricNames[allMetrics.At(i).Name()] = true
+	}
+	assert.True(t, metricNames["anthropic.request.conversation_turns"])
 }
