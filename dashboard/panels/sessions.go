@@ -15,7 +15,7 @@ import (
 // Prometheus metric names for session and project tracking.
 const (
 	MetricSessionRequests       = "claude_code_session_requests_total"
-	MetricSessionActiveDuration = "claude_code_session_active_duration_total"
+	MetricSessionActiveDuration = "claude_code_session_active_duration_seconds_total"
 	MetricSessionCost           = "claude_code_session_cost_total"
 	MetricSessionTokensInput    = "claude_code_session_tokens_input_total"
 	MetricSessionTokensOutput   = "claude_code_session_tokens_output_total"

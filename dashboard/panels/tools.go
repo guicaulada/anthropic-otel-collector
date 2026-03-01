@@ -7,7 +7,6 @@ import (
 	"github.com/grafana/grafana-foundation-sdk/go/dashboard"
 	"github.com/grafana/grafana-foundation-sdk/go/piechart"
 	"github.com/grafana/grafana-foundation-sdk/go/stat"
-	"github.com/grafana/grafana-foundation-sdk/go/table"
 	"github.com/grafana/grafana-foundation-sdk/go/timeseries"
 )
 
@@ -130,19 +129,21 @@ func LinesChangedOverTime() cog.Builder[dashboard.Panel] {
 		})
 }
 
-// FileTypesWorkedOn returns a table showing file operations broken down by extension and operation.
+// FileTypesWorkedOn returns a bar gauge showing top file extensions by operation count.
 func FileTypesWorkedOn() cog.Builder[dashboard.Panel] {
-	return table.NewPanelBuilder().
+	return bargauge.NewPanelBuilder().
 		Title("File Types Worked On").
+		Description("Top 10 file extensions by number of operations over the selected range").
 		Datasource(datasourceRef()).
 		Height(8).
 		Span(12).
 		WithTarget(
 			promInstantQuery(
-				`sum by (file_extension, operation) (increase(anthropic_tool_use_file_type_total{`+filter+`}[$__range]))`,
-				"",
+				`topk(10, sum by (file_extension) (increase(anthropic_tool_use_file_type_total{`+filter+`}[$__range])))`,
+				"{{file_extension}}",
 			),
 		).
+		Orientation(common.VizOrientationHorizontal).
 		Thresholds(greenThresholds()).
 		ColorScheme(paletteColor())
 }

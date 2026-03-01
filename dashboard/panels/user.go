@@ -171,7 +171,7 @@ func UserErrorRate() cog.Builder[dashboard.Panel] {
 		).
 		WithTarget(
 			promInstantQuery(
-				f(`sum(rate(anthropic_errors_total{%s}[$__rate_interval])) / sum(rate(anthropic_requests_total{%s}[$__rate_interval])) * 100`),
+				f(`(sum(rate(anthropic_errors_total{%s}[$__rate_interval])) or vector(0)) / (sum(rate(anthropic_requests_total{%s}[$__rate_interval])) > 0) * 100`),
 				"Error Rate",
 			),
 		)
@@ -210,7 +210,7 @@ func UserCostOverTime() cog.Builder[dashboard.Panel] {
 		Title("Cost Over Time").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(12).
+		Span(24).
 		Unit("currencyUSD").
 		Legend(defaultLegend()).
 		Tooltip(multiTooltip()).
@@ -302,10 +302,11 @@ func UserCacheSavingsOverTime() cog.Builder[dashboard.Panel] {
 		)
 }
 
-// UserCumulativeCostByProject returns a stacked timeseries showing cumulative cost by project.
+// UserCumulativeCostByProject returns a stacked timeseries showing cost rate by project per 5-minute window.
 func UserCumulativeCostByProject() cog.Builder[dashboard.Panel] {
 	return timeseries.NewPanelBuilder().
-		Title("Cumulative Cost by Project").
+		Title("Cost Rate by Project (5m)").
+		Description("Cost per 5-minute window by project, resilient to counter resets").
 		Datasource(datasourceRef()).
 		Height(8).
 		Span(24).
@@ -319,7 +320,7 @@ func UserCumulativeCostByProject() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				fmt.Sprintf(`sum by (claude_code_project_name) (%s{%s})`, MetricProjectCost, projectFilter),
+				fmt.Sprintf(`sum by (claude_code_project_name) (increase(%s{%s}[5m]))`, MetricProjectCost, projectFilter),
 				"{{claude_code_project_name}}",
 			),
 		)
@@ -712,7 +713,7 @@ func UserErrorRateOverTime() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				f(`sum(rate(anthropic_errors_total{%s}[$__rate_interval])) / sum(rate(anthropic_requests_total{%s}[$__rate_interval])) * 100`),
+				f(`(sum(rate(anthropic_errors_total{%s}[$__rate_interval])) or vector(0)) / (sum(rate(anthropic_requests_total{%s}[$__rate_interval])) > 0) * 100`),
 				"Error Rate %",
 			),
 		)
@@ -734,7 +735,7 @@ func UserErrorsByType() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				f(`sum by (error_type) (rate(anthropic_errors_by_type_total{%s}[$__rate_interval]))`),
+				f(`sum by (error_type) (rate(anthropic_errors_by_type_total{%s}[$__rate_interval])) or vector(0)`),
 				"{{error_type}}",
 			),
 		)

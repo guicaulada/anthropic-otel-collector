@@ -70,7 +70,7 @@ func ErrorRate() cog.Builder[dashboard.Panel] {
 		).
 		WithTarget(
 			promInstantQuery(
-				f(`sum(rate(anthropic_errors_total{%s}[$__rate_interval])) / sum(rate(anthropic_requests_total{%s}[$__rate_interval])) * 100`),
+				f(`(sum(rate(anthropic_errors_total{%s}[$__rate_interval])) or vector(0)) / (sum(rate(anthropic_requests_total{%s}[$__rate_interval])) > 0) * 100`),
 				"Error Rate",
 			),
 		)
@@ -231,7 +231,7 @@ func FastModeRequests() cog.Builder[dashboard.Panel] {
 		).
 		WithTarget(
 			promInstantQuery(
-				f(`sum(increase(anthropic_requests_by_speed_total{%s, speed="fast"}[$__range]))`),
+				f(`sum(increase(anthropic_requests_by_speed_total{%s, speed="fast"}[$__range])) or vector(0)`),
 				"Fast Mode Requests",
 			),
 		)

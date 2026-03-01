@@ -121,7 +121,7 @@ func TokensByModel() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				f(`sum by (gen_ai_request_model) (rate(anthropic_tokens_total_input_total{%s}[$__rate_interval]))`),
+				f(`sum by (gen_ai_request_model) (rate(anthropic_tokens_input_total{%s}[$__rate_interval]))`),
 				"{{gen_ai_request_model}} Input",
 			),
 		).

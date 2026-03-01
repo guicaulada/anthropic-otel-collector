@@ -94,7 +94,7 @@ func ContentBlockTypes() cog.Builder[dashboard.Panel] {
 func RequestsBySpeed() cog.Builder[dashboard.Panel] {
 	return piechart.NewPanelBuilder().
 		Title("Requests by Speed").
-		Description("Distribution of requests by speed tier over the selected range").
+		Description("Distribution of requests by speed tier (standard/fast). Shows data only when speed metadata is present in requests.").
 		Datasource(datasourceRef()).
 		Height(8).
 		Span(6).

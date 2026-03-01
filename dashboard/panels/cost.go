@@ -102,11 +102,11 @@ func CostByCategory() cog.Builder[dashboard.Panel] {
 		)
 }
 
-// CumulativeCost returns a timeseries panel showing the cumulative total cost.
+// CumulativeCost returns a timeseries panel showing cost rate per 5-minute window.
 func CumulativeCost() cog.Builder[dashboard.Panel] {
 	return timeseries.NewPanelBuilder().
-		Title("Cumulative Cost").
-		Description("Running total of all costs").
+		Title("Cost Rate (5m)").
+		Description("Cost per 5-minute window, resilient to counter resets").
 		Datasource(datasourceRef()).
 		Height(8).
 		Span(8).
@@ -115,8 +115,8 @@ func CumulativeCost() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				f(`sum(anthropic_cost_total{%s})`),
-				"Cumulative Cost",
+				f(`sum(increase(anthropic_cost_total{%s}[5m]))`),
+				"Cost / 5m",
 			),
 		)
 }
@@ -189,7 +189,7 @@ func CacheSavingsOverTime() cog.Builder[dashboard.Panel] {
 		Description("Estimated cache savings rate in $/hr").
 		Datasource(datasourceRef()).
 		Height(8).
-		Span(12).
+		Span(24).
 		Unit("currencyUSD").
 		Legend(defaultLegend()).
 		Tooltip(multiTooltip()).

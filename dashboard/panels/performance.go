@@ -158,7 +158,7 @@ func ErrorRateOverTime() cog.Builder[dashboard.Panel] {
 		Tooltip(multiTooltip()).
 		WithTarget(
 			promRangeQuery(
-				f(`sum by (error_type) (rate(anthropic_errors_total{%s}[$__rate_interval]))`),
+				f(`sum by (error_type) (rate(anthropic_errors_total{%s}[$__rate_interval])) or vector(0)`),
 				"{{error_type}}",
 			),
 		)
