@@ -8,56 +8,34 @@ import (
 	"github.com/guicaulada/anthropic-otel-collector/dashboard/panels"
 )
 
-func buildPublicDashboard() (dashboard.Dashboard, error) {
-	builder := dashboard.NewDashboardBuilder("Claude Code Activity").
-		Uid("claude-code-activity").
-		Description("Public activity dashboard showcasing Claude Code usage across projects, tools, and code changes").
-		Tags([]string{"anthropic", "claude", "activity"}).
-		Refresh("30s").
-		Time("now-7d", "now").
+func buildCodingStatsDashboard() (dashboard.Dashboard, error) {
+	builder := dashboard.NewDashboardBuilder("Claude Code Coding Stats").
+		Uid("claude-code-coding-stats").
+		Description("Compact coding stats dashboard showing lines changed, file types, projects, and tool usage").
+		Tags([]string{"anthropic", "claude", "coding", "stats"}).
+		Time("now-30d", "now").
 		Timezone("browser").
 		Tooltip(dashboard.DashboardCursorSyncCrosshair).
-		Variables(buildPublicVariables()).
-		// Row 1: Activity Overview
-		WithRow(dashboard.NewRowBuilder("Activity Overview")).
-		WithPanel(panels.TotalRequests()).
-		WithPanel(panels.TotalTokens()).
+		Variables(buildCodingStatsVariables()).
+		// Row 1: Stats (6+6+6+6=24)
 		WithPanel(panels.TotalLinesChanged()).
 		WithPanel(panels.TotalFilesTouched()).
-		// Row 2: Projects
-		WithRow(dashboard.NewRowBuilder("Projects")).
-		WithPanel(panels.ProjectRequestsBreakdown()).
-		WithPanel(panels.ProjectRequestsOverTime()).
-		// Row 3: Code Activity
-		WithRow(dashboard.NewRowBuilder("Code Activity")).
+		WithPanel(panels.TotalRequests()).
+		WithPanel(panels.TotalTokens()).
+		// Row 2: Activity (16+8=24)
 		WithPanel(panels.LinesChangedOverTime()).
 		WithPanel(panels.FileOperations()).
+		// Row 3: Projects (6+18=24)
+		WithPanel(panels.ProjectRequestsBreakdown()).
+		WithPanel(panels.ProjectRequestsOverTime()).
+		// Row 4: Breakdown (12+12=24)
 		WithPanel(panels.FileTypesWorkedOn()).
-		WithPanel(panels.BashCommands()).
-		WithPanel(panels.SearchOperations()).
-		WithPanel(panels.FilesTouched()).
-		// Row 4: Tool Usage (collapsed)
-		WithRow(
-			dashboard.NewRowBuilder("Tool Usage").
-				WithPanel(panels.ToolCallDistribution()).
-				WithPanel(panels.ToolCallsOverTime()),
-		).
-		// Row 5: AI Insights (collapsed)
-		WithRow(
-			dashboard.NewRowBuilder("AI Insights").
-				WithPanel(panels.RequestsByModel()).
-				WithPanel(panels.StopReasons()).
-				WithPanel(panels.ContentBlockTypes()).
-				WithPanel(panels.ServerToolUse()).
-				WithPanel(panels.AvgMessagesPerRequest()).
-				WithPanel(panels.StreamingVsNonStreaming()).
-				WithPanel(panels.ThinkingEnabledRequests()),
-		)
+		WithPanel(panels.ToolCallDistribution())
 
 	return builder.Build()
 }
 
-func buildPublicVariables() []cog.Builder[dashboard.VariableModel] {
+func buildCodingStatsVariables() []cog.Builder[dashboard.VariableModel] {
 	dsVar := dashboard.NewDatasourceVariableBuilder("datasource").
 		Label("Data Source").
 		Type("prometheus").
@@ -65,7 +43,8 @@ func buildPublicVariables() []cog.Builder[dashboard.VariableModel] {
 			Text:     dashboard.StringOrArrayOfString{String: strPtr("default")},
 			Value:    dashboard.StringOrArrayOfString{String: strPtr("default")},
 			Selected: boolPtr(true),
-		})
+		}).
+		Hide(dashboard.VariableHideHideVariable)
 
 	modelQuery := "label_values(" + MetricRequests + ", gen_ai_request_model)"
 	modelVar := dashboard.NewQueryVariableBuilder("model").
@@ -109,7 +88,8 @@ func buildPublicVariables() []cog.Builder[dashboard.VariableModel] {
 		IncludeAll(true).
 		AllValue(".*").
 		Multi(true).
-		Sort(dashboard.VariableSortAlphabeticalAsc)
+		Sort(dashboard.VariableSortAlphabeticalAsc).
+		Hide(dashboard.VariableHideHideVariable)
 
 	return []cog.Builder[dashboard.VariableModel]{
 		dsVar,

@@ -22,8 +22,8 @@ func main() {
 
 	dashboards := []dashboardDef{
 		{"main", "anthropic-claude-code-usage.json", buildDashboard},
-		{"activity", "claude-code-activity.json", buildPublicDashboard},
-		{"lean", "claude-code-lean.json", buildLeanDashboard},
+		{"developer-activity", "claude-code-developer-activity.json", buildActivityDashboard},
+		{"coding-stats", "claude-code-coding-stats.json", buildCodingStatsDashboard},
 	}
 
 	for _, d := range dashboards {

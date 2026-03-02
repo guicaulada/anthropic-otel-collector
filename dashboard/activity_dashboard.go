@@ -8,34 +8,56 @@ import (
 	"github.com/guicaulada/anthropic-otel-collector/dashboard/panels"
 )
 
-func buildLeanDashboard() (dashboard.Dashboard, error) {
-	builder := dashboard.NewDashboardBuilder("Claude Code Lean").
-		Uid("claude-code-lean").
-		Description("Compact lean dashboard optimized for GitHub profile screenshots").
-		Tags([]string{"anthropic", "claude", "lean"}).
-		Time("now-30d", "now").
+func buildActivityDashboard() (dashboard.Dashboard, error) {
+	builder := dashboard.NewDashboardBuilder("Claude Code Developer Activity").
+		Uid("claude-code-developer-activity").
+		Description("Comprehensive developer activity dashboard covering projects, code changes, tools, and AI insights").
+		Tags([]string{"anthropic", "claude", "developer", "activity"}).
+		Refresh("30s").
+		Time("now-7d", "now").
 		Timezone("browser").
 		Tooltip(dashboard.DashboardCursorSyncCrosshair).
-		Variables(buildLeanVariables()).
-		// Row 1: Stats (6+6+6+6=24)
-		WithPanel(panels.TotalLinesChanged()).
-		WithPanel(panels.TotalFilesTouched()).
+		Variables(buildActivityVariables()).
+		// Row 1: Activity Overview
+		WithRow(dashboard.NewRowBuilder("Activity Overview")).
 		WithPanel(panels.TotalRequests()).
 		WithPanel(panels.TotalTokens()).
-		// Row 2: Activity (16+8=24)
-		WithPanel(panels.LinesChangedOverTime()).
-		WithPanel(panels.FileOperations()).
-		// Row 3: Projects (6+18=24)
+		WithPanel(panels.TotalLinesChanged()).
+		WithPanel(panels.TotalFilesTouched()).
+		// Row 2: Projects
+		WithRow(dashboard.NewRowBuilder("Projects")).
 		WithPanel(panels.ProjectRequestsBreakdown()).
 		WithPanel(panels.ProjectRequestsOverTime()).
-		// Row 4: Breakdown (12+12=24)
+		// Row 3: Code Activity
+		WithRow(dashboard.NewRowBuilder("Code Activity")).
+		WithPanel(panels.LinesChangedOverTime()).
+		WithPanel(panels.FileOperations()).
 		WithPanel(panels.FileTypesWorkedOn()).
-		WithPanel(panels.ToolCallDistribution())
+		WithPanel(panels.BashCommands()).
+		WithPanel(panels.SearchOperations()).
+		WithPanel(panels.FilesTouched()).
+		// Row 4: Tool Usage (collapsed)
+		WithRow(
+			dashboard.NewRowBuilder("Tool Usage").
+				WithPanel(panels.ToolCallDistribution()).
+				WithPanel(panels.ToolCallsOverTime()),
+		).
+		// Row 5: AI Insights (collapsed)
+		WithRow(
+			dashboard.NewRowBuilder("AI Insights").
+				WithPanel(panels.RequestsByModel()).
+				WithPanel(panels.StopReasons()).
+				WithPanel(panels.ContentBlockTypes()).
+				WithPanel(panels.ServerToolUse()).
+				WithPanel(panels.AvgMessagesPerRequest()).
+				WithPanel(panels.StreamingVsNonStreaming()).
+				WithPanel(panels.ThinkingEnabledRequests()),
+		)
 
 	return builder.Build()
 }
 
-func buildLeanVariables() []cog.Builder[dashboard.VariableModel] {
+func buildActivityVariables() []cog.Builder[dashboard.VariableModel] {
 	dsVar := dashboard.NewDatasourceVariableBuilder("datasource").
 		Label("Data Source").
 		Type("prometheus").
@@ -43,8 +65,7 @@ func buildLeanVariables() []cog.Builder[dashboard.VariableModel] {
 			Text:     dashboard.StringOrArrayOfString{String: strPtr("default")},
 			Value:    dashboard.StringOrArrayOfString{String: strPtr("default")},
 			Selected: boolPtr(true),
-		}).
-		Hide(dashboard.VariableHideHideVariable)
+		})
 
 	modelQuery := "label_values(" + MetricRequests + ", gen_ai_request_model)"
 	modelVar := dashboard.NewQueryVariableBuilder("model").
@@ -88,8 +109,7 @@ func buildLeanVariables() []cog.Builder[dashboard.VariableModel] {
 		IncludeAll(true).
 		AllValue(".*").
 		Multi(true).
-		Sort(dashboard.VariableSortAlphabeticalAsc).
-		Hide(dashboard.VariableHideHideVariable)
+		Sort(dashboard.VariableSortAlphabeticalAsc)
 
 	return []cog.Builder[dashboard.VariableModel]{
 		dsVar,
