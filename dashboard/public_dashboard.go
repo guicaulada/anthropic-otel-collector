@@ -36,19 +36,23 @@ func buildPublicDashboard() (dashboard.Dashboard, error) {
 		WithPanel(panels.BashCommands()).
 		WithPanel(panels.SearchOperations()).
 		WithPanel(panels.FilesTouched()).
-		// Row 4: Tool Usage
-		WithRow(dashboard.NewRowBuilder("Tool Usage")).
-		WithPanel(panels.ToolCallDistribution()).
-		WithPanel(panels.ToolCallsOverTime()).
-		// Row 5: AI Insights
-		WithRow(dashboard.NewRowBuilder("AI Insights")).
-		WithPanel(panels.RequestsByModel()).
-		WithPanel(panels.StopReasons()).
-		WithPanel(panels.ContentBlockTypes()).
-		WithPanel(panels.ServerToolUse()).
-		WithPanel(panels.AvgMessagesPerRequest()).
-		WithPanel(panels.StreamingVsNonStreaming()).
-		WithPanel(panels.ThinkingEnabledRequests())
+		// Row 4: Tool Usage (collapsed)
+		WithRow(
+			dashboard.NewRowBuilder("Tool Usage").
+				WithPanel(panels.ToolCallDistribution()).
+				WithPanel(panels.ToolCallsOverTime()),
+		).
+		// Row 5: AI Insights (collapsed)
+		WithRow(
+			dashboard.NewRowBuilder("AI Insights").
+				WithPanel(panels.RequestsByModel()).
+				WithPanel(panels.StopReasons()).
+				WithPanel(panels.ContentBlockTypes()).
+				WithPanel(panels.ServerToolUse()).
+				WithPanel(panels.AvgMessagesPerRequest()).
+				WithPanel(panels.StreamingVsNonStreaming()).
+				WithPanel(panels.ThinkingEnabledRequests()),
+		)
 
 	return builder.Build()
 }
