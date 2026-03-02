@@ -23,6 +23,7 @@ func main() {
 	dashboards := []dashboardDef{
 		{"main", "anthropic-claude-code-usage.json", buildDashboard},
 		{"activity", "claude-code-activity.json", buildPublicDashboard},
+		{"lean", "claude-code-lean.json", buildLeanDashboard},
 	}
 
 	for _, d := range dashboards {
