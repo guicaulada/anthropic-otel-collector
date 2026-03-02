@@ -150,41 +150,124 @@ Once configured, the collector automatically:
 
 ## OpenClaw Integration
 
-The collector provides first-class support for [OpenClaw](https://github.com/openclaw) multi-agent systems.
+The collector provides first-class support for [OpenClaw](https://github.com/openclaw) multi-agent systems. It extracts agent context from request headers, maps them to OTel attributes, and provides unified telemetry across all providers used by OpenClaw agents.
 
-### How it works
+### Context Headers
 
 OpenClaw sends custom headers with each LLM request that the collector extracts for telemetry:
 
-| Header | Description |
-|--------|-------------|
-| `X-OpenClaw-Agent-ID` | Unique agent identifier |
-| `X-OpenClaw-Session-Key` | Session key for grouping related calls |
-| `X-OpenClaw-Channel` | Communication channel (telegram, discord, slack, etc.) |
-| `X-OpenClaw-Workspace` | Workspace or project context |
-| `X-OpenClaw-Provider` | Target LLM provider name |
-| `X-OpenClaw-Target-URL` | Original provider API URL |
+| Header | OTel Attribute | Description |
+|--------|---------------|-------------|
+| `X-OpenClaw-Agent-ID` | `openclaw.agent.id` | Unique agent identifier |
+| `X-OpenClaw-Session-Key` | `openclaw.session.key` | Session key for grouping related calls |
+| `X-OpenClaw-Channel` | `openclaw.channel` | Communication channel (telegram, discord, slack, etc.) |
+| `X-OpenClaw-Workspace` | `openclaw.workspace` | Workspace or project context |
+| `X-OpenClaw-Provider` | `openclaw.provider` | Target LLM provider name |
+| `X-OpenClaw-Target-URL` | — | Original provider API URL (used for routing) |
 
-These are mapped to OTel attributes (`openclaw.agent.id`, `openclaw.channel`, etc.) on all traces, metrics, and logs.
+### W3C Trace Context Propagation
 
-### OpenClaw configuration
+The collector supports W3C `traceparent` header propagation for end-to-end distributed tracing. When OpenClaw sends a `traceparent` header, the collector extracts the trace context and propagates it to the upstream provider, creating a connected trace from OpenClaw through the collector to the provider API.
 
-Configure OpenClaw to route LLM traffic through the collector:
+### OpenClaw Client Middleware
+
+Use the `createCollectorProxy` middleware in OpenClaw to route LLM traffic through the collector with full context:
+
+```typescript
+// openclaw/src/infra/otel-collector.ts
+export interface CollectorConfig {
+  enabled: boolean;
+  baseUrl: string;  // e.g., "http://localhost:4319"
+}
+
+export function createCollectorProxy(
+  providerConfig: ModelProviderConfig,
+  collectorConfig: CollectorConfig,
+  context: OpenClawContext,
+  traceContext?: { traceId: string; spanId: string; sampled?: boolean }
+): ModelProviderConfig {
+  if (!collectorConfig.enabled) {
+    return providerConfig;
+  }
+
+  // Build W3C traceparent header for distributed tracing
+  const traceparent = traceContext
+    ? `00-${traceContext.traceId}-${traceContext.spanId}-${traceContext.sampled ? '01' : '00'}`
+    : undefined;
+
+  return {
+    ...providerConfig,
+    baseUrl: collectorConfig.baseUrl,
+    headers: {
+      ...providerConfig.headers,
+      ...(traceparent && { 'traceparent': traceparent }),
+      'X-OpenClaw-Agent-ID': context.agentId,
+      'X-OpenClaw-Session-Key': context.sessionKey,
+      'X-OpenClaw-Channel': context.channel,
+      'X-OpenClaw-Workspace': context.workspace,
+      'X-OpenClaw-Provider': providerConfig.id,
+      'X-OpenClaw-Target-URL': providerConfig.baseUrl,
+    },
+  };
+}
+```
+
+### OpenClaw Configuration
 
 ```yaml
 # ~/.openclaw/openclaw.yaml
+gateway:
+  # ... existing config
+
 models:
   otel_collector:
     enabled: true
     base_url: "http://localhost:4319"
+    # Can also be set per-provider
+
+  providers:
+    anthropic:
+      enabled: true
+      # If otel_collector.enabled, requests go through collector
+      # which then proxies to the actual Anthropic API
 ```
 
-### What you get
+### Unified Telemetry Schema
+
+All metrics use a consistent `llm.*` namespace with standard labels across providers:
+
+**Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `llm.requests.total` | Counter | Total LLM API requests |
+| `llm.request.duration` | Histogram | Request duration |
+| `llm.request.errors` | Counter | Failed requests |
+| `llm.tokens.input` | Counter | Input tokens consumed |
+| `llm.tokens.output` | Counter | Output tokens generated |
+| `llm.tokens.cache.read` | Counter | Tokens served from cache |
+| `llm.tokens.cache.write` | Counter | Tokens written to cache |
+| `llm.cost.total` | Counter | Total cost in USD |
+| `llm.tool_calls.total` | Counter | Tool call invocations |
+
+**Standard Labels:**
+
+| Label | Description | Example Values |
+|-------|-------------|----------------|
+| `provider` | LLM provider | `anthropic`, `openai`, `gemini` |
+| `model` | Model identifier | `claude-sonnet-4-6`, `gpt-4o`, `gemini-2.0-flash` |
+| `agent_id` | OpenClaw agent ID | `agent-123` |
+| `channel` | Communication channel | `telegram`, `discord`, `slack` |
+| `workspace` | Normalized workspace | `openclaw-core`, `dev-workspace` |
+| `status` | Request outcome | `success`, `error`, `timeout` |
+
+### What You Get
 
 - **Per-agent cost tracking** across all providers
 - **Channel-level metrics** (latency, token usage, errors by channel)
 - **Workspace activity** dashboards
-- **End-to-end traces** from OpenClaw through the collector to provider APIs (via W3C `traceparent` propagation)
+- **Provider comparison** (cost, latency, quality side-by-side)
+- **End-to-end traces** from OpenClaw through the collector to provider APIs
 
 ## Sending Data to Grafana Cloud
 
@@ -252,7 +335,68 @@ Import the pre-built Grafana dashboards from the `dashboard/dist/` directory int
 
 ## Configuration
 
-The receiver is configured in the collector YAML under the `anthropic` key:
+### Multi-Provider Configuration (OpenClaw)
+
+For multi-provider setups with OpenClaw, use the full provider configuration:
+
+```yaml
+receivers:
+  openclaw:
+    endpoint: "127.0.0.1:4319"
+
+    # Provider configurations
+    providers:
+      anthropic:
+        enabled: true
+        base_url: "https://api.anthropic.com"
+        default_model: "claude-sonnet-4-6"
+
+      openai:
+        enabled: true
+        base_url: "https://api.openai.com"
+        default_model: "gpt-4o"
+
+      gemini:
+        enabled: true
+        base_url: "https://generativelanguage.googleapis.com"
+        default_model: "gemini-2.0-flash"
+
+    # OpenClaw-specific settings
+    openclaw:
+      extract_context: true
+      workspace_aliases:
+        "/Users/dev/openclaw": "openclaw-core"
+        "/Users/dev/workspace": "dev-workspace"
+
+    # Telemetry settings
+    capture_request_body: false
+    capture_response_body: false
+    max_body_capture_size: 65536
+    redact_api_key: true
+    rate_limit_warning_threshold: 0.8
+    parse_tool_calls: true
+    include_file_path_label: false
+
+    # Per-model pricing (USD per million tokens)
+    pricing:
+      "claude-opus-4-6":
+        input_per_m_token: 5.0
+        output_per_m_token: 25.0
+        cache_read_per_m_token: 0.50
+        cache_creation_per_m_token: 6.25
+      "gpt-4o":
+        input_per_m_token: 2.50
+        output_per_m_token: 10.0
+        cache_read_per_m_token: 1.25
+        cache_creation_per_m_token: 2.50
+      "gemini-2.0-flash":
+        input_per_m_token: 0.10
+        output_per_m_token: 0.40
+```
+
+### Single-Provider Configuration (Anthropic Only)
+
+For Anthropic-only use, the existing configuration continues to work with no changes:
 
 ```yaml
 receivers:
@@ -407,6 +551,48 @@ This collector is built with the [OpenTelemetry Collector Builder](https://opent
 | `otlpexporter`      | Exporter  | Sends telemetry via gRPC                           |
 | `otlphttpexporter`  | Exporter  | Sends telemetry via HTTP                           |
 | `batchprocessor`    | Processor | Batches data before export                         |
+
+## Migration Path
+
+### For Existing Anthropic-Only Users
+
+No breaking changes — the collector continues to work as before with the `anthropic` receiver key:
+
+```yaml
+receivers:
+  anthropic:
+    endpoint: "127.0.0.1:4319"
+    anthropic_api: "https://api.anthropic.com"
+```
+
+### For OpenClaw Users
+
+Enable multi-provider support and context extraction:
+
+```yaml
+receivers:
+  openclaw:
+    endpoint: "127.0.0.1:4319"
+    providers:
+      anthropic:
+        enabled: true
+        base_url: "https://api.anthropic.com"
+      openai:
+        enabled: true
+        base_url: "https://api.openai.com"
+    openclaw:
+      extract_context: true
+```
+
+## Benefits
+
+1. **Single observability pipeline** for all LLM providers
+2. **Unified cost tracking** across Anthropic, OpenAI, and Gemini
+3. **OpenClaw-specific insights** — agent performance, channel usage, workspace activity
+4. **Provider comparison** — cost, latency, and quality side-by-side
+5. **No code changes** to OpenClaw core — just configuration
+6. **Production-ready telemetry** — fixes for histogram encoding, trace propagation, and security controls
+7. **End-to-end trace visibility** — full request flow from OpenClaw to Collector to Provider APIs
 
 ## License
 
